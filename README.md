@@ -2,7 +2,7 @@
 
 **Production-grade AI coding workflow tool for Claude Code and Codex.**
 
-Threadwork weaves tasks, specs, and sessions into a single thread. It combines spec-driven project orchestration (from [GSD](https://github.com/gsd-build/get-shit-done)) with hook-enforced spec injection and automated quality gates (from [Trellis](https://github.com/mindfold-ai/Trellis)), and adds first-class **token budgeting**, **structured session handoffs**, and **skill-tier-aware output**.
+Threadwork weaves tasks, specs, and sessions into a single thread — a structured AI workflow layer that combines spec-driven project orchestration with hook-enforced spec injection, automated quality gates, first-class **token budgeting**, **structured session handoffs**, and **skill-tier-aware output**.
 
 ---
 
@@ -263,12 +263,47 @@ All agents receive skill tier instructions and token budget status automatically
 
 ---
 
-## Combining With GSD / Trellis
+## Starting from an Existing Blueprint or PRD
 
-Threadwork is compatible with projects using either GSD or Trellis:
+If you already have a requirements document, blueprint, or PRD, skip the interactive questions and feed it directly to Threadwork.
 
-- **From GSD**: Threadwork uses `.threadwork/state/` instead of `.planning/`. A `.planning/` alias is kept for gradual migration. Plan XML format is compatible.
-- **From Trellis**: Threadwork's spec library format is identical to Trellis. Your existing specs in `.trellis/spec/` can be copied to `.threadwork/specs/`.
+**Step 1:** Place your document anywhere in the project — the convention is `docs/`:
+
+```
+your-project/
+└── docs/
+    └── blueprint.md   ← your requirements or blueprint
+```
+
+**Step 2:** Initialize Threadwork:
+
+```bash
+threadwork init
+```
+
+**Step 3:** Run `/tw:new-project` with `--from-prd`:
+
+```
+/tw:new-project --from-prd docs/blueprint.md
+```
+
+This skips all seven clarifying questions and instead reads your document to generate:
+
+- `.threadwork/state/PROJECT.md` — vision, principles, stack
+- `.threadwork/state/REQUIREMENTS.md` — structured REQ-001/REQ-002 requirements
+- `.threadwork/state/ROADMAP.md` — milestone and phase breakdown
+- `.threadwork/state/STATE.json` — machine-readable project state
+- Initial spec entries in `.threadwork/specs/`
+
+**Step 4:** Continue with the standard phase workflow:
+
+```
+/tw:discuss-phase 1
+/tw:plan-phase 1
+/tw:execute-phase 1
+/tw:verify-phase 1
+/tw:clear
+```
 
 ---
 

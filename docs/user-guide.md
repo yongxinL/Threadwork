@@ -20,7 +20,7 @@
 12. [Agent Roster](#12-agent-roster)
 13. [Directory Structure](#13-directory-structure)
 14. [Configuration Reference](#14-configuration-reference)
-15. [Migrating from GSD / Trellis](#15-migrating-from-gsd--trellis)
+15. [Starting from an Existing Blueprint](#15-starting-from-an-existing-blueprint)
 16. [Troubleshooting](#16-troubleshooting)
 
 ---
@@ -29,13 +29,11 @@
 
 Threadwork is an AI workflow orchestration layer that sits on top of Claude Code (or Codex). It gives AI coding sessions structure, memory, and quality enforcement that survive across multiple sessions.
 
-It combines two proven tools:
+It provides:
 
-- **GSD** — project orchestration: phases, milestones, planning, and execution
-- **Trellis** — knowledge persistence: spec injection, quality gates, and session memory
-
-On top of that foundation, Threadwork adds:
-
+- **Spec-driven project orchestration** — phases, milestones, planning, and parallel execution
+- **Hook-enforced spec injection** — conventions and patterns injected automatically into every agent
+- **Automated quality gates** — the Ralph Loop blocks completion until lint, typecheck, and tests pass
 - **Token budgeting** — track and estimate usage before you run out of context
 - **Structured session handoffs** — end every session with a resume prompt that restores full context
 - **Skill-tier-aware output** — the AI adjusts verbosity to your experience level
@@ -835,25 +833,76 @@ threadwork update
 
 ---
 
-## 15. Migrating from GSD / Trellis
+## 15. Starting from an Existing Blueprint
 
-### From GSD
+If you already have a requirements document, blueprint, or PRD before starting a Threadwork project, use the `--from-prd` flag to skip the interactive questions and let Threadwork read your document instead.
 
-Threadwork's plan XML format is compatible with GSD. State is stored in `.threadwork/state/` instead of `.planning/`. A `.planning/` symlink alias is created for gradual migration.
+### Where to put your document
 
-To migrate:
-1. Run `threadwork init` in your project
-2. Copy your existing plan XML files into `.threadwork/state/phases/phase-N/plans/`
-3. Update `project.json` to reflect your current phase and milestone
+Place it anywhere in the project — the convention is `docs/`:
 
-### From Trellis
+```
+your-project/
+├── docs/
+│   ├── blueprint.md        ← your blueprint or PRD
+│   └── requirements.md     ← optional separate requirements doc
+└── ...
+```
 
-Threadwork's spec library format is identical to Trellis. Spec frontmatter and file structure are the same.
+The file can be any name with any extension (`.md`, `.txt`, `.pdf`, `.docx`). It just needs to be readable from the project root.
 
-To migrate:
-1. Run `threadwork init`
-2. Copy your `.trellis/spec/` files into `.threadwork/specs/`
-3. The injection engine will pick them up automatically — no reformatting needed
+### Procedure
+
+**Step 1: Initialize Threadwork**
+
+```bash
+threadwork init
+```
+
+Answer the six setup questions (project name, stack, quality thresholds, team mode, skill tier, session budget). These configure the runtime — not the project requirements, which will come from your document.
+
+**Step 2: Run `/tw:new-project --from-prd`**
+
+```
+/tw:new-project --from-prd docs/blueprint.md
+```
+
+This skips all seven clarifying questions and instead:
+
+1. Reads your document
+2. Spawns a `tw-researcher` agent to analyze the domain and identify patterns
+3. Spawns a `tw-planner` agent to generate project files from your document's content
+
+**Step 3: Review generated files**
+
+Threadwork generates four files in `.threadwork/state/`:
+
+| File | Contents |
+|------|----------|
+| `PROJECT.md` | Vision (2–3 sentences), core principles, confirmed tech stack, constraints |
+| `REQUIREMENTS.md` | Functional requirements in REQ-001/REQ-002 format, non-functional requirements, explicitly out-of-scope items |
+| `ROADMAP.md` | Milestone and phase breakdown derived from your document |
+| `STATE.json` | Machine-readable project state |
+
+Initial spec entries are also written to `.threadwork/specs/` based on stack decisions found in your document.
+
+Review the generated files and correct anything that was misread. You can edit them directly — they're plain markdown.
+
+**Step 4: Continue with the standard phase workflow**
+
+```
+/tw:discuss-phase 1     ← capture preferences before planning
+/tw:plan-phase 1        ← generate XML execution plans
+/tw:execute-phase 1     ← run parallel wave execution
+/tw:verify-phase 1      ← verify output meets requirements
+/tw:clear               ← close phase, advance to next
+```
+
+### What if my document is partial or informal?
+
+`--from-prd` works with any level of detail. If your document is a rough outline or a one-page summary, the planner will ask clarifying questions about gaps before generating the roadmap. If your document is a formal specification, the planner will use it directly.
+
+For very early-stage projects where no document exists yet, use `/tw:new-project` without `--from-prd` — the interactive questions produce the same output from scratch.
 
 ---
 
