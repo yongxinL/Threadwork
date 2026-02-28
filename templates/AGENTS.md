@@ -15,6 +15,7 @@ Threadwork is an AI coding workflow tool that combines spec-driven project orche
 5. **Quality gates are non-negotiable** — the Ralph Loop will re-invoke you if lint/typecheck/tests fail. Fix the actual error, do not suppress it.
 6. **Specs override habits** — if a spec says "use jose for JWT", use jose. Not jsonwebtoken. Not a custom implementation.
 7. **Run `/tw:done` at the end of every session** — this generates the handoff doc and resume prompt. Skipping it means losing session context.
+8. **In Team mode, `BUDGET_LOW` is a hard stop** — if your worker budget drops below 10%, write a checkpoint and send `BUDGET_LOW` to the orchestrator immediately. Do not continue executing tasks.
 
 ---
 
@@ -27,6 +28,8 @@ Threadwork is an AI coding workflow tool that combines spec-driven project orche
 | `/tw:discuss-phase <N>` | Capture library/pattern decisions before planning | Before plan-phase |
 | `/tw:plan-phase <N>` | Generate XML plans with token estimates + phase budget preview | After discuss-phase |
 | `/tw:execute-phase <N>` | Parallel wave execution with spec injection + Ralph Loop | After plan-phase |
+| `/tw:execute-phase <N> --team` | Team-model parallel execution with bidirectional escalation | After plan-phase (multi-agent) |
+| `/tw:execute-phase <N> --no-team` | Force legacy fire-and-forget execution | When budget is tight |
 | `/tw:verify-phase <N>` | Goal-backward verification + token variance report | After execute-phase |
 | `/tw:quick <desc>` | Fast task — shows estimate first, executes, commits | Small tasks |
 | `/tw:parallel <desc>` | Isolated worktree execution → draft PR | Parallel features |
@@ -58,6 +61,7 @@ Threadwork is an AI coding workflow tool that combines spec-driven project orche
 │   ├── active-task.json       ← Currently executing task
 │   ├── completed-tasks.json   ← Task completion log
 │   ├── token-log.json         ← Token usage + variance data
+│   ├── team-session.json      ← Active team coordination state (cleared after each wave)
 │   ├── hook-log.json          ← Hook execution log + threshold events
 │   ├── ralph-state.json       ← Quality gate retry state
 │   ├── quality-config.json    ← Which gates are enabled/blocking
@@ -90,7 +94,7 @@ Threadwork registers 4 hooks into `~/.claude/settings.json` (Claude Code) or `AG
 | Hook | Event | What It Does |
 |------|-------|-------------|
 | `session-start.js` | SessionStart | Injects project context, token budget, skill tier into every session |
-| `pre-tool-use.js` | PreToolUse (Task calls) | Injects relevant specs + tier instructions into every subagent prompt |
+| `pre-tool-use.js` | PreToolUse (Task + TeamCreate) | Injects relevant specs + tier instructions into every subagent prompt; injects budget + tier into TeamCreate calls |
 | `post-tool-use.js` | PostToolUse | Tracks token usage, detects learning patterns, writes checkpoint |
 | `subagent-stop.js` | SubagentStop | **Ralph Loop** — runs quality gates, blocks completion on failure |
 

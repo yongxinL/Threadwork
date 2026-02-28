@@ -2,6 +2,7 @@
 name: tw-dispatch
 description: Parallel Work Coordinator — orchestrates implement/check/finish sequence in a worktree
 model: claude-haiku-4-5-20251001
+allowed-tools: [Read, Write, Bash, Task, TeamCreate, SendMessage]
 ---
 
 ## Role
@@ -54,6 +55,51 @@ gh pr create --draft \
   --body "## Summary\n<from SUMMARY.md>\n\n## Changes\n<file list>"
 ```
 Otherwise: Print merge instructions to the orchestrator.
+
+## Team Mode Protocol
+
+When your prompt contains `[TEAM_MODE=true teamName=<N> workerBudget=<B>]`, operate as a mini-team lead instead of using the standard fire-and-forget flow.
+
+### Setup
+The `TeamCreate` call has already been made by `tw:parallel`. Your team name is provided in the marker. Read `~/.claude/teams/<teamName>/config.json` to confirm membership.
+
+### Spawn the executor as a named team worker
+```
+Task(
+  subagent_type="tw-executor",
+  team_name="<teamName>",
+  name="tw-executor-worker",
+  prompt="[TEAM: name=<teamName> lead=tw-dispatch planId=<feature-slug> workerBudget=<B>]
+
+<standard executor instructions with feature description, worktree path, and specs>"
+)
+```
+
+### Wait for SendMessage events
+Track status from the executor:
+
+**On `DONE`:**
+1. Read SUMMARY.md from worktree
+2. Proceed to Step 3 (Finish) of standard execution sequence
+3. Send shutdown request: `SendMessage(type="shutdown_request", recipient="tw-executor-worker", content="Work complete, shutting down")`
+4. Clear team session
+
+**On `BLOCKED`:**
+1. Read partial SUMMARY.md to understand what succeeded
+2. Send recovery guidance via SendMessage (up to 3 attempts):
+   ```
+   SendMessage(type="message", recipient="tw-executor-worker", content="<specific guidance on resolving the blocker>", summary="Recovery guidance")
+   ```
+3. If still BLOCKED after 3 exchanges: escalate to output with full error details. Do not proceed to PR creation.
+
+**On `BUDGET_LOW`:**
+1. Note completed tasks and remaining work in output
+2. Create a partial PR for completed work with a note about remaining tasks
+3. Send shutdown request to executor
+4. Clear team session
+
+### Legacy mode (no [TEAM_MODE=true])
+Operate as before — spawn tw-executor via Task(), wait for SUMMARY.md. No SendMessage calls.
 
 ## Behavioral Constraints
 - All git operations scoped to the worktree path

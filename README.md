@@ -93,7 +93,50 @@ npm unlink -g threadwork-cc
 | **Skill tiers** | `beginner` / `advanced` / `ninja` — controls verbosity across all outputs uniformly |
 | **Spec library** | Growing library of patterns injected per-task. AI proposes updates; you approve them |
 | **Parallel execution** | Wave-based parallel subagent execution with topological dependency ordering |
+| **Team model support** | Claude Code Team model with bidirectional escalation, per-worker budgets, and auto/legacy/team control |
 | **Brownfield support** | `/tw:analyze-codebase` maps existing projects and generates starter specs |
+
+---
+
+## Team Mode (Parallel Agent Coordination)
+
+Threadwork supports the Claude Code Team model for bidirectional multi-agent execution. Instead of fire-and-forget parallel tasks, agents join a named team and communicate via `SendMessage` — blocked executors escalate to the orchestrator; the orchestrator can recover rather than silently fail.
+
+### Control
+
+Set your default at init or change anytime:
+
+```
+# In Claude Code:
+/tw:status set teamMode auto     # system decides per wave — recommended
+/tw:status set teamMode team     # always use Team model
+/tw:status set teamMode legacy   # always use fire-and-forget
+```
+
+Per-invocation overrides always win:
+
+```
+/tw:execute-phase 2              # uses project teamMode setting
+/tw:execute-phase 2 --team       # force Team model this phase
+/tw:execute-phase 2 --no-team    # force legacy this phase
+/tw:execute-phase 2 --team --max-workers 2   # Team model, cap at 2 parallel workers
+```
+
+### Auto mode decision logic
+
+When `teamMode=auto`, the system checks four conditions per wave before using Team model:
+- Wave has 2+ plans (single plans use legacy — no overhead worth it)
+- Remaining budget ≥ 30% of session budget
+- Sum of wave plan estimates ≤ 50% of remaining budget
+- Skill tier allows ≥ 2 workers (beginner=2, advanced=3, ninja=5)
+
+### Token cost
+
+Team mode runs multiple agents simultaneously — token consumption scales with worker count. Built-in controls:
+- `--max-workers N` caps parallelism
+- Auto mode falls back to legacy when budget is too low
+- Each worker gets an individual budget cap (`floor(remaining × 0.6 / workers)`, min 50K)
+- Workers send `BUDGET_LOW` before exceeding their cap — orchestrator can shut them down cleanly
 
 ---
 
@@ -146,8 +189,10 @@ npm unlink -g threadwork-cc
 
 ### Configuration
 ```
-/tw:tier [set <tier>]     View or change skill tier
-/tw:status                Full project status dashboard
+/tw:tier [set <tier>]                  View or change skill tier
+/tw:status                             Full project status dashboard
+/tw:status set teamMode <value>        Set parallel execution mode (legacy|auto|team)
+/tw:status set maxWorkers <N|auto>     Set max parallel workers per wave
 ```
 
 ---

@@ -108,8 +108,12 @@ async function main() {
   const agentType = payload.agent_type ?? payload.subagent_type ?? '';
   const agentName = payload.agent_name ?? '';
 
-  // Skip quality gates for non-code agents
-  const nonCodeAgents = ['planner', 'researcher', 'verifier', 'dispatch', 'spec-writer', 'tw-planner', 'tw-researcher', 'tw-verifier', 'tw-dispatch', 'tw-spec-writer'];
+  // Skip quality gates for non-code agents (coordinators, planners, etc.)
+  const nonCodeAgents = [
+    'planner', 'researcher', 'verifier', 'dispatch', 'spec-writer',
+    'tw-planner', 'tw-researcher', 'tw-verifier', 'tw-dispatch', 'tw-spec-writer',
+    'tw-orchestrator'  // Team model orchestrator — coordinates, does not write code
+  ];
   const isNonCode = nonCodeAgents.some(a => agentType.includes(a) || agentName.includes(a));
 
   if (isNonCode) {
@@ -117,6 +121,15 @@ async function main() {
     process.stdout.write(JSON.stringify({ action: 'allow' }));
     return;
   }
+
+  // Log team context if a team session is active
+  try {
+    const { readTeamSession } = await import('../lib/state.js');
+    const teamSession = readTeamSession();
+    if (teamSession && !teamSession.cleared && teamSession.status === 'active') {
+      logHook('INFO', `subagent-stop: team=${teamSession.teamName} worker=${agentName || agentType}`);
+    }
+  } catch { /* never crash */ }
 
   try {
     const { runAll } = await import('../lib/quality-gate.js');

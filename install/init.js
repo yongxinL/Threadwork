@@ -79,14 +79,21 @@ export async function runInit(options) {
     const lintMap = { '1': 'strict', '2': 'standard', '3': 'relaxed' };
     const lintLevel = lintMap[lintAnswer.trim() || '1'] ?? 'strict';
 
-    // ── Question 4: Team or solo ──────────────────────────────────────────
-    console.log('\n4. Team or solo mode:');
-    console.log('   1) Solo (single developer)');
-    console.log('   2) Small team (2–3 people)');
-    console.log('   3) Team (4+ people)');
-    const teamAnswer = await ask(rl, '   Choice (default: 1): ');
-    const teamMap = { '1': 'solo', '2': 'small-team', '3': 'team' };
-    const teamMode = teamMap[teamAnswer.trim() || '1'] ?? 'solo';
+    // ── Question 4: Team mode ─────────────────────────────────────────────
+    console.log('\n4. Parallel execution mode (controls how /tw:execute-phase runs):');
+    console.log('   1) Legacy   — single-agent execution, safe & predictable (lower token cost)');
+    console.log('   2) Auto     — system decides per-wave based on plan count & budget (recommended)');
+    console.log('   3) Team     — always use Claude Code Team model when possible (fastest, higher token cost)');
+    const teamAnswer = await ask(rl, '   Choice (default: 2): ');
+    const teamMap = { '1': 'legacy', '2': 'auto', '3': 'team' };
+    const teamMode = teamMap[teamAnswer.trim() || '2'] ?? 'auto';
+
+    let maxWorkers = 'auto';
+    if (teamMode !== 'legacy') {
+      const maxWorkersAnswer = await ask(rl, '   Max workers per wave? (default: auto = use tier limit): ');
+      const parsed = parseInt(maxWorkersAnswer.trim(), 10);
+      maxWorkers = (!isNaN(parsed) && parsed >= 1 && parsed <= 10) ? parsed : 'auto';
+    }
 
     // ── Question 5: Skill tier ─────────────────────────────────────────────
     console.log('\n5. Skill tier (controls AI output verbosity):');
@@ -111,7 +118,7 @@ export async function runInit(options) {
     console.log(`  Project:      ${projectName}`);
     console.log(`  Stack:        ${techStack}`);
     console.log(`  Coverage:     ${minCoverage}%  |  Lint: ${lintLevel}`);
-    console.log(`  Team mode:    ${teamMode}`);
+    console.log(`  Team mode:    ${teamMode}${teamMode !== 'legacy' ? ` (max workers: ${maxWorkers})` : ''}`);
     console.log(`  Skill tier:   ${skillTier}`);
     console.log(`  Token budget: ${(sessionBudget / 1000).toFixed(0)}K`);
     console.log(`  Runtime:      ${runtime}`);
@@ -151,6 +158,7 @@ export async function runInit(options) {
       skillTier,
       sessionBudget,
       teamMode,
+      maxWorkers,
       qualityConfig: { minCoverage, lintLevel }
     };
     writeFileSync(

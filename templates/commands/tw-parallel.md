@@ -1,8 +1,8 @@
 ---
 name: tw:parallel
 description: Run a task in an isolated git worktree — implement, run Ralph Loop, create PR
-argument-hint: "<feature description> [--dry-run]"
-allowed-tools: [Read, Write, Bash, Task]
+argument-hint: "<feature description> [--dry-run] [--team] [--no-team]"
+allowed-tools: [Read, Write, Bash, Task, TeamCreate, SendMessage]
 ---
 
 ## Preconditions
@@ -19,16 +19,45 @@ allowed-tools: [Read, Write, Bash, Task]
 
 If `--dry-run`: show what would be created, exit without creating.
 
-### Step 2: Spawn dispatch agent
-Spawn `tw-dispatch` with:
-- Feature description
-- Worktree path
-- Relevant specs (from spec-engine)
+### Step 2: Determine execution mode and spawn dispatch agent
 
-Dispatch orchestrates: Implement → Check (Ralph Loop) → Finish → PR
+**Mode detection** (same resolution logic as tw:execute-phase):
+```
+--no-team flag → LEGACY (always wins)
+--team flag    → TEAM
+teamMode=legacy (project.json) → LEGACY
+teamMode=team  (project.json) → TEAM
+teamMode=auto  (project.json) → TEAM (single feature dispatch benefits from escalation)
+```
+
+**If TEAM mode:**
+1. Generate team name: `tw-par-<feature-slug>-<timestamp>`
+2. Call `TeamCreate(team_name="<teamName>", description="Parallel feature: <description>")`
+3. Write `.threadwork/state/team-session.json` with `mode: "parallel"`, `featureSlug`, `worktreePath`
+4. Calculate workerBudget: `floor(remainingBudget × 0.6 / 1)` (single worker)
+5. Spawn dispatch with team marker:
+   ```
+   Task(
+     subagent_type="tw-dispatch",
+     prompt="[TEAM_MODE=true teamName=<N> workerBudget=<B>]
+   Feature: <description>
+   Worktree: <path>
+   <specs>"
+   )
+   ```
+
+**If LEGACY mode:**
+Spawn `tw-dispatch` without team marker (existing behavior):
+```
+Task(
+  subagent_type="tw-dispatch",
+  prompt="Feature: <description>\nWorktree: <path>\n<specs>"
+)
+```
 
 ### Step 3: Monitor
-Display progress updates as dispatch reports them.
+- **Team mode**: Progress arrives as `SendMessage` events from dispatch — display each as it arrives (real-time)
+- **Legacy mode**: Display progress updates as dispatch reports them (existing behavior)
 
 ### Step 4: On completion
 If Ralph Loop passes and implementation is complete:

@@ -22,6 +22,7 @@
 14. [Configuration Reference](#14-configuration-reference)
 15. [Starting from an Existing Blueprint](#15-starting-from-an-existing-blueprint)
 16. [Troubleshooting](#16-troubleshooting)
+17. [Team Mode](#17-team-mode)
 
 ---
 
@@ -955,6 +956,143 @@ All hook output is logged to `.threadwork/workspace/hook-log.json`. Check this f
 
 ```bash
 cat .threadwork/workspace/hook-log.json | tail -50
+```
+
+---
+
+## 17. Team Mode
+
+### 17.1 What is Team Mode?
+
+By default, `/tw:execute-phase` uses **legacy mode**: each plan in a wave is spawned as a fire-and-forget `Task()` call. Executors write `SUMMARY.md` when done — but if an executor hits a blocking issue mid-task, it fails silently.
+
+**Team mode** upgrades this to Claude Code's Team model:
+- Executors join a named team and communicate via `SendMessage`
+- A blocked executor sends `BLOCKED` to the orchestrator with the specific reason
+- The orchestrator can send recovery guidance and retry — rather than silently failing the plan
+- The orchestrator sees real-time status per plan (`DONE` / `BLOCKED` / `BUDGET_LOW`)
+- The Ralph Loop still runs after each executor stops — quality gates are enforced regardless
+
+### 17.2 `teamMode` Setting
+
+Set at `threadwork init` (question 4) or change anytime with `/tw:status set teamMode <value>`:
+
+| Value | Behavior |
+|---|---|
+| `legacy` | Always use fire-and-forget Task() execution. Predictable, lower token overhead. |
+| `auto` | **Recommended.** System decides per wave based on plan count and budget (see 17.3). |
+| `team` | Always use Team model when budget allows (≥10% remaining). Fastest for large phases. |
+
+### 17.3 Auto-Decision Logic
+
+When `teamMode=auto`, the system evaluates four conditions before each wave:
+
+| Condition | Threshold | Why |
+|---|---|---|
+| Plan count | ≥ 2 | Single plans don't benefit from team overhead |
+| Remaining budget | ≥ 30% of session budget | Ensures enough budget for all workers + future waves |
+| Wave estimate | ≤ 50% of remaining budget | Prevents a single wave from exhausting the budget |
+| Tier max workers | ≥ 2 | Beginner=2, Advanced=3, Ninja=5 |
+
+If any condition fails, the wave uses legacy mode. The decision is shown inline:
+
+```
+Wave 1: 3 plans — Team mode  (budget: 420K/800K, est: 95K, workers: 3)
+Wave 2: 1 plan  — Legacy mode (single plan)
+```
+
+### 17.4 Token Budget in Team Mode
+
+Running multiple agents in parallel multiplies token consumption. Threadwork manages this with:
+
+**Per-worker budget cap:**
+```
+workerBudget = floor(remainingBudget × 0.6 / numWorkers)
+minimum: 50,000 tokens
+```
+
+The 0.6 factor reserves 40% for the orchestrator and future waves. Each executor receives its cap in the `[TEAM: ... workerBudget=<N>]` marker.
+
+**`BUDGET_LOW` protocol:**
+When a worker's remaining budget drops below 10% of its cap:
+1. It writes a checkpoint with remaining tasks listed
+2. Sends `BUDGET_LOW planId=<P> remaining=<task IDs>` to the orchestrator
+3. Stops cleanly — the orchestrator notes the partial completion
+
+This prevents workers from silently consuming more than their allocation.
+
+**See also:** [Section 8 — Token Budget System](#8-token-budget-system) for session-level budget controls.
+
+### 17.5 Flags Reference
+
+| Flag | Description |
+|---|---|
+| `--team` | Force Team model for this invocation (overrides project teamMode) |
+| `--no-team` | Force legacy mode for this invocation (always wins) |
+| `--max-workers N` | Cap parallel workers per wave (1–10; overrides tier default) |
+
+Examples:
+```
+/tw:execute-phase 2                        # use project teamMode
+/tw:execute-phase 2 --team                 # force Team model
+/tw:execute-phase 2 --no-team              # force legacy (budget-conscious)
+/tw:execute-phase 2 --team --max-workers 2 # Team model, max 2 workers per wave
+/tw:parallel "add dark mode" --team        # parallel feature with mini-team
+/tw:parallel "add dark mode" --no-team     # parallel feature, legacy dispatch
+```
+
+### 17.6 `team-session.json`
+
+When a team wave is active, Threadwork writes `.threadwork/state/team-session.json`:
+
+```json
+{
+  "_version": "1",
+  "_updated": "2026-03-01T10:00:00.000Z",
+  "teamName": "tw-phase-2-1-12345678",
+  "phase": 2,
+  "waveIndex": 1,
+  "mode": "execute-phase",
+  "leadName": "tw-orchestrator",
+  "workerNames": ["tw-executor-plan-2-1", "tw-executor-plan-2-2"],
+  "workerBudget": 160000,
+  "activePlans": ["PLAN-2-1", "PLAN-2-2"],
+  "completedPlans": [],
+  "failedPlans": [],
+  "startedAt": "2026-03-01T09:58:00.000Z",
+  "status": "active",
+  "cleared": false
+}
+```
+
+This file is visible in `/tw:status` when a team session is active. It is cleared (set to `{ cleared: true }`) after each wave completes.
+
+### 17.7 Troubleshooting Team Mode
+
+**`TeamCreate` failed / Team model not available**
+
+The system automatically falls back to legacy mode for that wave and logs:
+```
+TeamCreate failed, falling back to legacy wave execution
+```
+This usually means you're on an older version of Claude Code that doesn't support the Team tools. Upgrade Claude Code or use `--no-team` to always use legacy.
+
+**No messages received from executor (executor crashed)**
+
+If an executor completes (all Task() calls finish) but never sent a `SendMessage`, the orchestrator reads `SUMMARY.md` as an implicit result. This is the same as legacy behavior — backward compatible.
+
+**Stale team session showing in `/tw:status`**
+
+Team sessions older than 2 hours are automatically considered stale and hidden from the status display. To clear one manually:
+```bash
+echo '{"cleared":true}' > .threadwork/state/team-session.json
+```
+
+**Executor stuck in BLOCKED loop**
+
+The orchestrator retries up to 3 times with recovery guidance. If the plan is still blocked, it's marked FAILED in `execution-log.json` and the wave continues with remaining plans. You can re-run just the failed plan next session:
+```
+/tw:execute-phase 2 --plan PLAN-2-3
 ```
 
 ---
