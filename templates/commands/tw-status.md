@@ -2,7 +2,7 @@
 name: tw:status
 description: Show full project status dashboard — phase, milestone, active task, token budget, and quality gate state
 argument-hint: "[set teamMode <legacy|auto|team>] [set maxWorkers <N|auto>]"
-allowed-tools: [Read, Write, Bash, Glob]
+allowed-tools: [Read, Write, Bash, Glob, TaskList]
 ---
 
 ## Preconditions
@@ -36,7 +36,7 @@ Read the following files and compose a status dashboard:
 3. `.threadwork/state/checkpoint.json` — if exists, note recovery available
 4. `.threadwork/state/ralph-state.json` — if exists, note pending quality gate retries
 5. `.threadwork/state/active-task.json` — current task details
-6. `.threadwork/state/team-session.json` — if active (status=active, not cleared, <2h old), show team info
+6. `.threadwork/state/team-session.json` — if active (status=active, not cleared, <2h old), show team info **plus** worker health (see Team Session section below)
 7. Most recent file in `.threadwork/workspace/journals/` — last session summary
 
 ## Output Format
@@ -63,6 +63,32 @@ Where [STATUS] is:
 - 🚨 Critical (> 90%)
 
 Team session line only renders if `team-session.json` exists with `status=active`, not cleared, and started within the last 2 hours.
+
+### Team Session Worker Health (when team session active)
+
+After the compact table, if a team session is active:
+
+1. Call `TaskList` to get live task statuses from the Claude Code team task list
+2. Cross-reference with `workerLastSeen` from `team-session.json`
+3. Print a per-worker health table:
+
+```
+Team Workers: tw-phase-2-1-12345678
+  Worker                      Task Status     Last Heard    Plan Status
+  tw-executor-plan-2-1        in_progress     2 min ago     PLAN-2-1 (3/5 tasks)
+  tw-executor-plan-2-2        in_progress     1 min ago     PLAN-2-2 (1/3 tasks)
+  tw-executor-plan-2-3        pending         18 min ago ⚠️  PLAN-2-3 (silent)
+  tw-executor-plan-2-4        completed       8 min ago     PLAN-2-4 DONE ✓
+```
+
+Staleness indicators:
+- < 5 min: no badge (healthy)
+- 5–14 min: `(quiet)` — may be on a long-running task
+- 15+ min: `⚠️  (silent)` — potentially stuck, orchestrator should ping
+- 20+ min: `✗ (timed out)` — orchestrator marked as FAILED
+
+If `workerLastSeen` is empty (no heartbeats received yet), show:
+`  ⚠️ No worker heartbeats recorded — workers may not have confirmed startup`
 
 **Beginner tier**: Add a "What this means" paragraph after the table explaining each item, including an explanation of the team mode setting.
 

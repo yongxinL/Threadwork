@@ -2,7 +2,7 @@
 name: tw:execute-phase
 description: Execute all plans for a phase using parallel wave execution with spec injection and Ralph Loop quality gates
 argument-hint: "<phase-number> [--wave <N>] [--plan <ID>] [--team] [--no-team] [--max-workers <N>] [--yolo]"
-allowed-tools: [Read, Write, Edit, Bash, Task, TeamCreate, SendMessage, TodoWrite]
+allowed-tools: [Read, Write, Edit, Bash, Task, TeamCreate, SendMessage, TodoWrite, TaskCreate, TaskList, TaskUpdate]
 ---
 
 ## Preconditions
@@ -108,9 +108,13 @@ Write `.threadwork/state/team-session.json`:
   "workerBudget": <N>,
   "activePlans": ["PLAN-N-1", ...],
   "completedPlans": [], "failedPlans": [],
+  "workerTasks": {},
+  "workerLastSeen": {},
   "startedAt": "<ISO>", "status": "active"
 }
 ```
+`workerTasks` maps worker name → team task ID (populated in step 3T.3b).
+`workerLastSeen` maps worker name → ISO timestamp of last received message (updated on every message in 3T.4).
 
 **3T.3 Spawn workers in parallel** (up to `effectiveWorkers` at once):
 For each plan in the wave:
@@ -128,12 +132,57 @@ Branch: <git branch>"
 ```
 If `effectiveWorkers < planCount`: queue remaining plans for a sub-wave after current completes.
 
-**3T.4 Wait for SendMessage events** — track per plan:
-- `DONE planId=<P> tasks=<N> sha=<sha>` → mark plan complete, update `completedPlans` in team-session.json, read SUMMARY.md
+**3T.3b Register worker tasks in Claude Code task list:**
+Immediately after spawning all workers, create a task in the team task list for each plan so progress is visible in the UI:
+```
+TaskCreate(
+  content="PLAN-N-M: <title from plan XML>",
+  activeForm="Executing PLAN-N-M"
+)
+```
+Store the returned task ID in `team-session.json` under `workerTasks: { "tw-executor-plan-n-m": <taskId> }`.
+
+**3T.3c Verify workers joined (startup confirmation):**
+After spawning all workers, wait for a `STARTED planId=<P>` message from each worker (timeout: **3 minutes per worker**).
+
+- When `STARTED` is received from a worker:
+  - Update `workerLastSeen[workerName]` in `team-session.json` to now
+  - Update the corresponding team task status to `in_progress` via `TaskUpdate`
+  - Print: `  ✓ Worker tw-executor-plan-n-m confirmed alive`
+- If a worker does NOT send `STARTED` within 3 minutes:
+  - Print warning: `  ⚠️ Worker tw-executor-plan-n-m did not confirm — may not have started`
+  - Check `~/.claude/teams/<teamName>/config.json`: if the worker is absent from `members`, it failed to join
+  - Decision: if more than half the wave workers failed to confirm, fall back to LEGACY mode for this wave (re-run with `Step 3L`). Otherwise continue, marking the silent worker as potentially at-risk.
+
+**3T.4 Wait for SendMessage events** — track per plan with timeout detection:
+
+Maintain `lastHeartbeat` tracking: whenever **any** message is received from a worker (`STARTED`, `HEARTBEAT`, `DONE`, `BLOCKED`, `BUDGET_LOW`), update `workerLastSeen[workerName]` in `team-session.json`.
+
+Handle incoming messages:
+- `STARTED planId=<P> worker=<name>` → record worker confirmed, update `workerLastSeen`
+- `HEARTBEAT planId=<P> taskId=<T> completed=<N>/<total>` → update `workerLastSeen`, print progress line:
+  `  → PLAN-N-M: task T complete (<N>/<total>)`
+- `DONE planId=<P> tasks=<N> sha=<sha>` → mark plan complete, update `completedPlans` in team-session.json, `TaskUpdate` the team task to `completed`, read SUMMARY.md
 - `BLOCKED planId=<P> taskId=<T> reason=<R>` → attempt recovery:
   - Send up to 3 `SendMessage` replies with guidance to unblock
-  - If still BLOCKED after 3 attempts: mark plan as FAILED in team-session.json
+  - If still BLOCKED after 3 attempts: mark plan as FAILED in team-session.json, `TaskUpdate` to reflect failure
 - `BUDGET_LOW planId=<P> remaining=<tasks>` → mark plan as partial, note in execution log
+
+**Timeout detection loop** — while waiting, periodically check stale workers:
+
+Every time a message is processed, scan `workerLastSeen` for any worker not yet in a terminal state whose last message was more than **15 minutes** ago:
+
+```
+staleWorkers = workers where (now - workerLastSeen[w] > 15min) AND planId not in completedPlans AND planId not in failedPlans
+```
+
+For each stale worker:
+1. Check the team task list via `TaskList` — if the worker's task is still `pending` they likely never started; if `in_progress` they may be on a long-running subtask
+2. Send a ping: `SendMessage(type="message", recipient="<workerName>", content="PING planId=<P> — are you still running?", summary="Health check")`
+3. Wait 5 minutes for any response. If still silent at **20 minutes** total:
+   - Mark plan as FAILED with reason `"worker_timeout"`
+   - `TaskUpdate` the team task to reflect the timeout
+   - Print: `  ✗ Worker <name> timed out after 20 min — marking PLAN-N-M as FAILED`
 
 Wave is complete when all plans have a terminal status (DONE / FAILED / partial).
 
