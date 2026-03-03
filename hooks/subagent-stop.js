@@ -34,8 +34,12 @@ function logHook(level, message) {
 
 function readRalphState() {
   const p = RALPH_STATE_PATH();
-  if (!existsSync(p)) return { retries: 0, lastTaskId: null, lastUpdated: null };
-  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return { retries: 0 }; }
+  if (!existsSync(p)) return { retries: 0, lastTaskId: null, lastUpdated: null, remediation_log: [] };
+  try {
+    const data = JSON.parse(readFileSync(p, 'utf8'));
+    if (!data.remediation_log) data.remediation_log = [];
+    return data;
+  } catch { return { retries: 0, remediation_log: [] }; }
 }
 
 function writeRalphState(data) {
@@ -47,54 +51,69 @@ function writeRalphState(data) {
   }, null, 2), 'utf8');
 }
 
+/**
+ * Clear ralph-state but preserve the remediation_log by moving it to hook-log.json
+ * under a ralph_loop_history key. Keeps the learning record across sessions.
+ */
 function clearRalphState() {
-  writeRalphState({ retries: 0, lastTaskId: null, cleared: true });
+  const current = readRalphState();
+  const remediationLog = current.remediation_log ?? [];
+
+  if (remediationLog.length > 0) {
+    try {
+      const logDir = join(process.cwd(), '.threadwork', 'state');
+      const hookLogPath = join(logDir, 'hook-log.json');
+      // Append a history record to hook-log.json
+      const historyLine = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: 'INFO',
+        hook: 'subagent-stop',
+        message: 'ralph-state cleared',
+        ralph_loop_history: remediationLog
+      }) + '\n';
+      appendFileSync(hookLogPath, historyLine, 'utf8');
+    } catch { /* never crash */ }
+  }
+
+  writeRalphState({ retries: 0, lastTaskId: null, cleared: true, remediation_log: [] });
 }
 
 /**
- * Format quality gate errors for the correction prompt, tier-appropriate.
- * @param {object[]} results
- * @param {string} tier
+ * Build the correction prompt from a structured remediation payload.
+ * Includes primary violation, relevant spec, fix template, and raw failing errors.
+ *
+ * @param {object} rejectionPayload - Full rejection payload with remediation block
+ * @param {string} tier - Skill tier
  * @returns {string}
  */
-function formatCorrectionPrompt(results, tier) {
-  const failed = results.filter(r => !r.passed && !r.skipped);
+function buildRemediationPrompt(rejectionPayload, tier) {
+  const { iteration, gates, remediation } = rejectionPayload;
+  const maxRetries = MAX_RETRIES;
 
-  if (tier === 'ninja') {
-    const errors = failed.map(r => {
-      const errs = r.errors ?? r.failures ?? r.vulnerabilities ?? [];
-      return `${r.gate.toUpperCase()}:\n${errs.slice(0, 3).join('\n')}`;
+  const failedGates = Object.entries(gates ?? {})
+    .filter(([, v]) => v && !v.passed && !v.skipped)
+    .map(([gate, v]) => {
+      const errs = v.errors ?? v.failures ?? v.vulnerabilities ?? [];
+      return `${gate.toUpperCase()}:\n${errs.slice(0, 5).map(e => `  ${e}`).join('\n')}`;
     });
-    return `Fix these errors:\n\n${errors.join('\n\n')}`;
+
+  const parts = [
+    `QUALITY GATE REJECTION (iteration ${iteration} of ${maxRetries})`,
+    '',
+    `Primary violation: ${remediation?.primary_violation ?? 'Unknown'}`,
+  ];
+
+  if (remediation?.relevant_spec && remediation.relevant_spec !== 'None identified') {
+    parts.push(`Relevant spec: ${remediation.relevant_spec}`);
   }
 
-  if (tier === 'beginner') {
-    const sections = failed.map(r => {
-      const errs = r.errors ?? r.failures ?? r.vulnerabilities ?? [];
-      return [
-        `### ${r.gate.charAt(0).toUpperCase() + r.gate.slice(1)} Errors`,
-        `These ${r.gate} errors need to be fixed before your changes can be accepted:`,
-        '',
-        errs.slice(0, 5).map(e => `- \`${e}\``).join('\n'),
-        '',
-        `Fix each error listed above, then your changes will pass the quality check.`
-      ].join('\n');
-    });
-    return [
-      '## Quality Gate Failures — Please Fix',
-      '',
-      'Some automated checks failed on your code. Here is what needs to be fixed:',
-      '',
-      ...sections
-    ].join('\n');
+  parts.push(`Fix required: ${remediation?.fix_template ?? 'Review gate output below.'}`);
+
+  if (failedGates.length > 0) {
+    parts.push('', 'Raw errors:', ...failedGates);
   }
 
-  // advanced (default)
-  const sections = failed.map(r => {
-    const errs = r.errors ?? r.failures ?? r.vulnerabilities ?? [];
-    return `**${r.gate}**: ${errs.slice(0, 3).join('; ')}`;
-  });
-  return `Quality gates failed. Fix and re-verify:\n\n${sections.join('\n')}`;
+  return parts.join('\n');
 }
 
 async function main() {
@@ -132,8 +151,9 @@ async function main() {
   } catch { /* never crash */ }
 
   try {
-    const { runAll } = await import('../lib/quality-gate.js');
+    const { runAll, buildRemediationBlock } = await import('../lib/quality-gate.js');
     const { getTier, getWarningStyle } = await import('../lib/skill-tier.js');
+    const specEngine = await import('../lib/spec-engine.js');
 
     const tier = getTier();
     const gateResult = await runAll({ skipCache: true });
@@ -166,21 +186,66 @@ async function main() {
       return;
     }
 
-    // Write updated retry count
-    writeRalphState({ retries, lastUpdated: new Date().toISOString() });
+    // Build structured remediation block
+    const remediation = buildRemediationBlock(gateResult, specEngine, tier);
 
-    // Build correction prompt
-    const correctionPrompt = formatCorrectionPrompt(gateResult.results, tier);
+    // Build structured rejection payload
+    const gatesMap = {};
+    for (const r of gateResult.results) {
+      gatesMap[r.gate] = {
+        passed: r.passed,
+        skipped: r.skipped ?? false,
+        errors: r.errors ?? r.failures ?? r.vulnerabilities ?? []
+      };
+    }
+    const rejectionPayload = {
+      status: 'rejected',
+      iteration: retries,
+      gates: gatesMap,
+      remediation
+    };
 
-    logHook('WARNING', `subagent-stop: gates FAILED (retry ${retries}/${MAX_RETRIES}) | tier=${tier}`);
+    // Append to remediation_log (preserved on clear)
+    const remediationLog = ralph.remediation_log ?? [];
+    remediationLog.push({
+      iteration: retries,
+      timestamp: new Date().toISOString(),
+      primary_violation: remediation.primary_violation,
+      relevant_spec: remediation.relevant_spec,
+      learning_signal: remediation.learning_signal,
+      proposal_queued: false
+    });
 
-    // Block completion and re-invoke with correction
+    // Queue learning signal as spec proposal (confidence 0.3, ralph-loop source)
+    let proposalQueued = false;
+    try {
+      const { proposeSpecUpdate } = await import('../lib/spec-engine.js');
+      proposeSpecUpdate(
+        `auto/${gateResult.results.find(r => !r.passed && !r.skipped)?.gate ?? 'unknown'}`,
+        `# Auto-Detected Quality Pattern\n\n${remediation.learning_signal}`,
+        remediation.learning_signal,
+        { source: 'ralph-loop', learningSignal: remediation.learning_signal }
+      );
+      proposalQueued = true;
+      remediationLog[remediationLog.length - 1].proposal_queued = true;
+    } catch { /* spec engine may not be ready */ }
+
+    // Write updated ralph state
+    writeRalphState({ retries, lastUpdated: new Date().toISOString(), remediation_log: remediationLog });
+
+    // Build correction prompt from structured payload
+    const correctionPrompt = buildRemediationPrompt(rejectionPayload, tier);
+
+    logHook('WARNING', `subagent-stop: gates FAILED (retry ${retries}/${MAX_RETRIES}) | tier=${tier} | violation="${remediation.primary_violation.slice(0, 60)}" | proposal=${proposalQueued}`);
+
+    // Block completion and re-invoke with remediation-injected correction
     process.stdout.write(JSON.stringify({
       action: 'block',
       retry: true,
       message: correctionPrompt,
       retryCount: retries,
-      maxRetries: MAX_RETRIES
+      maxRetries: MAX_RETRIES,
+      remediation
     }));
 
   } catch (err) {
