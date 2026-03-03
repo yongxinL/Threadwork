@@ -72,7 +72,7 @@ See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for the full mi
 
 ---
 
-## [0.1.1] — 2025-04-12
+## [0.1.1] — 2026-02-28
 
 ### Added
 
@@ -90,7 +90,7 @@ See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for the full mi
 
 ---
 
-## [0.1.0] — 2025-03-28
+## [0.1.0] — 2026-02-27
 
 ### Added
 
@@ -109,7 +109,7 @@ See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for the full mi
 
 ---
 
-## [0.0.2] — 2025-02-10
+## [0.0.2] — 2026-02-18
 
 ### Added
 
@@ -126,7 +126,7 @@ See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for the full mi
 
 ---
 
-## [0.0.1] — 2025-01-15
+## [0.0.1] — 2026-02-17
 
 ### Added
 
