@@ -8,7 +8,7 @@
  * Execution target: < 100ms (defer heavy work to async queues)
  */
 
-import { readFileSync, appendFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 
 process.on('uncaughtException', (err) => {
@@ -137,21 +137,80 @@ async function main() {
       }
 
       // 5. Write checkpoint
+      let currentState = {};
       try {
         const { getGitInfo, writeCheckpoint, readState } = await import('../lib/state.js');
         const gitInfo = getGitInfo();
-        let state = {};
-        try { state = readState(); } catch { /* ok */ }
+        try { currentState = readState(); } catch { /* ok */ }
         writeCheckpoint({
-          phase: state.currentPhase,
-          milestone: state.currentMilestone,
-          activeTask: state.activeTask,
+          phase: currentState.currentPhase,
+          milestone: currentState.currentMilestone,
+          activeTask: currentState.activeTask,
           branch: gitInfo.branch,
           lastSha: gitInfo.sha,
           uncommittedCount: gitInfo.uncommitted.length,
           updatedByHook: 'post-tool-use'
         });
       } catch { /* state may not exist */ }
+
+      // 6. Wave-completion detection — spawn entropy collector if wave is done
+      try {
+        const { isWaveComplete, readExecutionLog, getWaveDiff, loadTasteInvariants, listEntropyReports } =
+          await import('../lib/entropy-collector.js');
+
+        const phaseId = currentState.currentPhase ?? 1;
+        const waveId = currentState.currentWave ?? 1;
+
+        // Use a simple flag file to prevent duplicate spawns within the same wave
+        const flagPath = join(process.cwd(), '.threadwork', 'state', `entropy-running-wave-${waveId}.flag`);
+        const execLog = readExecutionLog(phaseId);
+
+        if (execLog && isWaveComplete(execLog) && !existsSync(flagPath)) {
+          // Mark that collector is running for this wave
+          try {
+            mkdirSync(join(process.cwd(), '.threadwork', 'state'), { recursive: true });
+            writeFileSync(flagPath, new Date().toISOString(), 'utf8');
+          } catch { /* never crash */ }
+
+          const waveDiff = getWaveDiff(waveId, phaseId);
+          const tasteInvariants = loadTasteInvariants();
+          const previousReports = listEntropyReports(phaseId);
+
+          logHook('INFO', `post-tool-use: wave ${waveId} complete — spawning entropy collector`);
+
+          // Entropy collector agent spawn is handled by Claude Code's Task() mechanism.
+          // We log the trigger; the actual spawn happens via the session-level orchestrator
+          // or the developer's /tw:execute-phase command which watches for this flag.
+          logHook('INFO', `post-tool-use: entropy-trigger | wave=${waveId} | phase=${phaseId} | diff=${waveDiff.length} chars | invariants=${tasteInvariants.length}`);
+        }
+      } catch { /* entropy collector module may not exist yet */ }
+
+      // 7. Store promotion pipeline — runs at session end (Task tool final completion)
+      if (toolName === 'Task' && (toolOutput?.status === 'completed' || toolOutput?.done === true)) {
+        try {
+          const { promoteToStore } = await import('../lib/store.js');
+          const { readdirSync: rds, readFileSync: rfs, existsSync: efs } = await import('fs');
+          const { join: pj } = await import('path');
+          const proposalsDir = pj(process.cwd(), '.threadwork', 'specs', 'proposals');
+          if (efs(proposalsDir)) {
+            const proposals = rds(proposalsDir).filter(f => f.endsWith('.md'));
+            for (const pf of proposals) {
+              try {
+                const content = rfs(pj(proposalsDir, pf), 'utf8');
+                const confMatch = content.match(/confidence:\s*([\d.]+)/);
+                const promotedMatch = content.includes('promoted: true');
+                if (confMatch && !promotedMatch) {
+                  const conf = parseFloat(confMatch[1]);
+                  if (conf >= 0.7) {
+                    promoteToStore({ filePath: pj(proposalsDir, pf), content });
+                    logHook('INFO', `post-tool-use: promoted proposal ${pf} to Store (confidence ${conf})`);
+                  }
+                }
+              } catch { /* skip */ }
+            }
+          }
+        } catch { /* store module may not exist yet */ }
+      }
 
       const elapsed = Date.now() - start;
       logHook('INFO', `post-tool-use: ${toolName} | ${tokensUsed} tokens | ${elapsed}ms`);
