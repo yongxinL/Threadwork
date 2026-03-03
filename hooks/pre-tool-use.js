@@ -45,9 +45,9 @@ async function main() {
 
   try {
     const [
-      { getRelevantSpecs, buildInjectionBlock, getSpecTokenCount },
+      { buildRoutingMap, fetchSpecById, getRoutingMapTokens },
       { getTier, getTierInstructions, getWarningStyle },
-      { formatBudgetDashboard, checkThresholds }
+      { formatBudgetDashboard, checkThresholds, recordSpecFetch, estimateTokens }
     ] = await Promise.all([
       import('../lib/spec-engine.js'),
       import('../lib/skill-tier.js'),
@@ -66,6 +66,33 @@ async function main() {
     } else if (thresholds.warning) {
       budgetWarning = getWarningStyle('warning',
         'Token budget >80%. Wrap up after this task or start a new session.', tier);
+    }
+
+    // Intercept spec_fetch tool calls — return spec content as tool result
+    if (toolName === 'spec_fetch') {
+      const specId = payload.tool_input?.spec_id ?? payload.input?.spec_id ?? '';
+      const specContent = fetchSpecById(specId);
+      const tokens = estimateTokens(specContent);
+      try { recordSpecFetch(specId, tokens); } catch { /* never crash */ }
+      logHook('INFO', `pre-tool-use: spec_fetch ${specId} | ${tokens} tokens`);
+      // Return spec content as the tool result (intercept the call)
+      process.stdout.write(JSON.stringify({ ...payload, intercept: true, result: specContent }));
+      return;
+    }
+
+    // Intercept store_fetch tool calls — delegated to store module
+    if (toolName === 'store_fetch') {
+      try {
+        const { readEntry } = await import('../lib/store.js');
+        const entryId = payload.tool_input?.entry_id ?? payload.input?.entry_id ?? '';
+        const entry = readEntry(entryId);
+        logHook('INFO', `pre-tool-use: store_fetch ${entryId}`);
+        process.stdout.write(JSON.stringify({ ...payload, intercept: true, result: entry }));
+      } catch (err) {
+        logHook('ERROR', `pre-tool-use: store_fetch failed: ${err.message}`);
+        process.stdout.write(JSON.stringify(payload));
+      }
+      return;
     }
 
     if (isTeamCreate) {
@@ -87,7 +114,7 @@ async function main() {
       return;
     }
 
-    // Task() injection path
+    // Task() injection path — v0.2.0: routing map instead of full spec injection
     const taskInput = payload.tool_input ?? payload.input ?? {};
     const taskDescription = taskInput.prompt ?? taskInput.description ?? taskInput.task ?? '';
 
@@ -98,20 +125,27 @@ async function main() {
       currentPhase = getPhase();
     } catch { /* state may not exist */ }
 
-    // Select relevant specs for this task
-    const relevantSpecs = getRelevantSpecs(taskDescription, currentPhase);
-    const specTokens = getSpecTokenCount(relevantSpecs);
-    const injectionBlock = buildInjectionBlock(relevantSpecs);
+    // Build compact routing map (~150 tokens) instead of full spec injection
+    const routingMap = buildRoutingMap(taskDescription, currentPhase);
+    const routingMapTokens = getRoutingMapTokens(routingMap);
+
+    // Spec fetch tool definition injected into every agent
+    const specFetchToolDef = [
+      '<!-- spec_fetch tool available: call spec_fetch with spec_id to get full spec content -->',
+      '<!-- store_fetch tool available: call store_fetch with entry_id to get Store entry -->'
+    ].join('\n');
 
     // Compose full injection prefix
     const injectionParts = [
-      `<!-- Threadwork Context Injection -->`,
+      `<!-- Threadwork Context Injection (v0.2.0) -->`,
       tierInstructions,
       '',
       budgetDashboard,
       budgetWarning ? `\n${budgetWarning}` : '',
       '',
-      injectionBlock
+      routingMap,
+      '',
+      specFetchToolDef
     ].filter(Boolean);
 
     const injectionPrefix = injectionParts.join('\n').trim();
@@ -123,7 +157,7 @@ async function main() {
       payload.tool_input.description = injectionPrefix + '\n\n---\n\n' + taskInput.description;
     }
 
-    logHook('INFO', `pre-tool-use: injected ${specTokens} spec tokens | tier=${tier} | task="${taskDescription.slice(0, 60)}"`);
+    logHook('INFO', `pre-tool-use: injected routing map (${routingMapTokens} tokens) | tier=${tier} | task="${taskDescription.slice(0, 60)}"`);
 
     process.stdout.write(JSON.stringify(payload));
 

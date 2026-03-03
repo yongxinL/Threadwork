@@ -48,7 +48,7 @@ async function main() {
       { readLatestJournal },
       { readLatestHandoff },
       { loadSpecIndex },
-      { formatBudgetDashboard, resetSessionUsage },
+      { formatBudgetDashboard, resetSessionUsage, checkThresholds },
       { getTier, getTierInstructions, getWarningStyle }
     ] = await Promise.all([
       import('../lib/state.js'),
@@ -128,6 +128,21 @@ async function main() {
 
     if (specIndex) {
       parts.push(`### Active Spec Domains`, specIndex.slice(0, 800), '');
+    }
+
+    // v0.2.0: Store section (compact, ~50 tokens) — skip if budget > 80%
+    const thresholds = checkThresholds();
+    if (!thresholds.warning) {
+      try {
+        const { getStoreInjectionBlock } = await import('../lib/store.js');
+        const storeBlock = getStoreInjectionBlock();
+        if (storeBlock) {
+          parts.push(storeBlock, '');
+          logHook('INFO', 'session-start: Store section injected');
+        }
+      } catch { /* store module may not exist yet */ }
+    } else {
+      logHook('INFO', 'session-start: Store section skipped — budget above 80%');
     }
 
     parts.push(tierInstructions);
