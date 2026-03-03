@@ -6,6 +6,22 @@ Threadwork weaves tasks, specs, and sessions into a single thread — a structur
 
 ---
 
+## What's New in v0.2.0
+
+Five targeted upgrades informed by LangChain's harness taxonomy and OpenAI's harness engineering report:
+
+| Upgrade | What changed | Impact |
+|---------|-------------|--------|
+| **Remediation-Injecting Ralph Loop** | Quality gate rejections now include a structured `remediation` block with `primary_violation`, `relevant_spec`, and a concrete `fix_template`. Every rejection teaches the agent how to fix it. | Agents fix errors faster; fewer Ralph Loop iterations |
+| **Progressive Disclosure Spec Injection** | Replaced upfront full-spec injection (~3K–8K tokens) with a compact routing map (~150 tokens). Agents fetch full specs on demand via `spec_fetch` tool. | Saves ~20K–80K tokens per 14-task phase |
+| **Background Entropy Collector** | New 9th agent (`tw-entropy-collector`) scans wave diffs for naming drift, orphaned files, and cross-output inconsistencies after each wave completes. Auto-fixes minor issues. | No more "AI slop" accumulation between waves |
+| **Cross-Session Memory Store** | Global `~/.threadwork/store/` persists high-confidence patterns, edge cases, and conventions across projects. Promoted from spec proposals automatically. | Every project benefits from all previous projects |
+| **Execution Plan Decision Logs** | Executor agents append `<decisions>` blocks to plan XML as they work, capturing _why_ choices were made. Handoff Section 4 is now auto-populated from these. | Architectural decisions survive session boundaries |
+
+**Upgrading from v0.1.x?** Run `threadwork update --to v0.2.0` — non-destructive, idempotent. See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md).
+
+---
+
 ## Quick Start
 
 ```bash
@@ -54,8 +70,8 @@ npm install
 
 # 3. Verify everything passes
 npm run check        # syntax check all JS files
-npm test             # unit tests (40 tests)
-npm run test:all     # unit + integration tests (78 tests)
+npm test             # unit tests
+npm run test:all     # unit + integration tests (184 tests)
 
 # 4. Test hooks manually
 node hooks/test-harness.js all
@@ -87,11 +103,14 @@ npm unlink -g threadwork-cc
 | Feature | Description |
 |---------|-------------|
 | **Hook-driven context** | 4 hooks inject specs, tier instructions, and token budget into every agent automatically |
-| **Ralph Loop** | SubagentStop hook runs lint/typecheck/tests after every subagent — blocks completion until gates pass |
-| **Token budgeting** | Tracks usage, warns at 80%/90%, shows variance vs estimates per task |
-| **Session handoffs** | `/tw:done` generates a 10-section handoff with a paste-able resume prompt |
+| **Ralph Loop** | SubagentStop hook runs lint/typecheck/tests after every subagent — rejections include a structured remediation block that teaches the agent exactly how to fix the error |
+| **Progressive spec injection** | Routing map (~150 tokens) injected at spawn; agents pull full specs on demand via `spec_fetch`. Saves ~20K–80K tokens per phase vs v0.1.x |
+| **Token budgeting** | Tracks usage including spec fetch overhead; warns at 80%/90%; shows variance vs estimates per task |
+| **Session handoffs** | `/tw:done` generates a 10-section handoff. Section 4 (Key Decisions) auto-populated from plan XML `<decisions>` blocks |
 | **Skill tiers** | `beginner` / `advanced` / `ninja` — controls verbosity across all outputs uniformly |
-| **Spec library** | Growing library of patterns injected per-task. AI proposes updates; you approve them |
+| **Spec library** | Growing library of patterns injected per-task. AI proposes updates; you approve them. High-confidence proposals promote to the global Store |
+| **Cross-session Store** | `~/.threadwork/store/` persists patterns, edge cases, and conventions across all projects |
+| **Background entropy collector** | After each wave, the 9th agent scans diffs for naming drift, orphaned files, and cross-output inconsistencies. Auto-fixes minor issues |
 | **Parallel execution** | Wave-based parallel subagent execution with topological dependency ordering |
 | **Team model support** | Claude Code Team model with bidirectional escalation, per-worker budgets, and auto/legacy/team control |
 | **Brownfield support** | `/tw:analyze-codebase` maps existing projects and generates starter specs |
@@ -180,11 +199,19 @@ Team mode runs multiple agents simultaneously — token consumption scales with 
 /tw:recover               Restore from checkpoint after crash
 ```
 
-### Knowledge
+### Knowledge & Memory
 ```
 /tw:recall <query>        Search journals, specs, handoffs, history
 /tw:specs [subcommand]    Manage spec library
 /tw:journal [subcommand]  View/search session journals
+/tw:store                 Cross-session Store dashboard (patterns, edge-cases, conventions)
+/tw:store list            List all Store entries with confidence scores
+/tw:store show <key>      Display a specific Store entry
+/tw:store promote <id>    Manually promote a spec proposal to the Store
+/tw:store prune           Remove low-confidence Store entries
+/tw:entropy               Latest entropy report for current phase/wave
+/tw:entropy history       List all entropy reports with issue counts
+/tw:entropy show <N>      Show entropy report for a specific wave
 ```
 
 ### Configuration
@@ -202,10 +229,10 @@ Team mode runs multiple agents simultaneously — token consumption scales with 
 Threadwork registers 4 hooks into `~/.claude/settings.json`:
 
 ```
-SessionStart   → session-start.js   Injects project context, budget, tier
-PreToolUse     → pre-tool-use.js    Injects specs + tier into every Task() call
-PostToolUse    → post-tool-use.js   Tracks tokens, detects patterns, writes checkpoint
-SubagentStop   → subagent-stop.js   Ralph Loop — quality gates block completion
+SessionStart   → session-start.js   Injects project context, budget, tier, Store entries
+PreToolUse     → pre-tool-use.js    Injects routing map; intercepts spec_fetch/store_fetch calls
+PostToolUse    → post-tool-use.js   Tracks tokens, detects wave completion, triggers entropy collector
+SubagentStop   → subagent-stop.js   Ralph Loop — structured remediation block on rejection
 ```
 
 **Hooks never crash sessions.** All hooks catch errors and exit 0 — quality failures result in retry messages, not session crashes.
@@ -284,10 +311,13 @@ The resume prompt contains everything needed to restore context — no file read
 ```
 .threadwork/
 ├── state/              project.json, checkpoint.json, token-log.json, quality-config.json
-│   └── phases/         per-phase context, plans, verification, execution logs
-├── specs/              spec library — frontend, backend, testing, proposals
-└── workspace/          journals, handoffs, archive
+│   └── phases/         per-phase context, plans (with <decisions>), execution logs, entropy reports
+├── specs/              spec library — frontend, backend, testing, proposals (with SPEC: IDs)
+├── store/              cross-session Store (patterns/, edge-cases/, conventions/, store-index.json)
+└── workspace/          journals, handoffs (auto-enriched Section 4), archive
 ```
+
+The global Store lives at `~/.threadwork/store/` — shared across all your projects.
 
 ---
 
@@ -297,14 +327,15 @@ The resume prompt contains everything needed to restore context — no file read
 |-------|-------|------|
 | `tw-planner` | Opus | Generates XML plans with token estimates |
 | `tw-researcher` | Opus | Domain research and library recommendations |
-| `tw-executor` | Sonnet | Implements tasks with atomic commits |
+| `tw-executor` | Sonnet | Implements tasks with atomic commits + decision logging |
 | `tw-verifier` | Sonnet | Goal-backward requirements verification |
 | `tw-plan-checker` | Sonnet | Validates plans across 6 quality dimensions |
 | `tw-debugger` | Opus | Hypothesis-driven debugging |
 | `tw-dispatch` | Haiku | Parallel work coordinator |
 | `tw-spec-writer` | Haiku | Writes spec entries from detected patterns |
+| `tw-entropy-collector` | Haiku | **New in v0.2.0** — Post-wave codebase integrity scan |
 
-All agents receive skill tier instructions and token budget status automatically via the pre-tool-use hook.
+All agents receive skill tier instructions, token budget status, and a spec routing map automatically via the pre-tool-use hook.
 
 ---
 
@@ -349,6 +380,26 @@ This skips all seven clarifying questions and instead reads your document to gen
 /tw:verify-phase 1
 /tw:clear
 ```
+
+---
+
+## Upgrading from v0.1.x
+
+```bash
+# In your project directory
+threadwork update --to v0.2.0
+```
+
+What it does (idempotent — safe to run multiple times):
+1. Backs up your current hooks to `.threadwork/backup/v0.1.x-hooks/`
+2. Updates all framework files (hooks, lib, commands, agents)
+3. Creates `.threadwork/store/` with `store-index.json`
+4. Patches `project.json` with `_version: "0.2.0"` and `store_enabled: true`
+5. Patches `token-log.json` to add `spec_fetch_tokens` field
+6. Patches `ralph-state.json` to add `remediation_log` field
+7. Runs `generateSpecIds()` to add routing map IDs to your spec files
+
+User specs, journals, handoffs, and plan files are **never modified**. See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for full details and rollback instructions.
 
 ---
 
