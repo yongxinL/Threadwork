@@ -44,6 +44,7 @@ program
 program
   .command('update')
   .description('Update Threadwork framework files (preserves user specs and state)')
+  .option('--to <version>', 'Migrate to a specific version (e.g. v0.2.0)')
   .option('--dry-run', 'Preview what would change without applying', false)
   .action(async (options) => {
     try {
