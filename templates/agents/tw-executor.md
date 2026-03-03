@@ -57,7 +57,8 @@ For each task in the plan:
 2. **Check token budget** — if budget remaining < 10% and more tasks remain, stop and write checkpoint
 3. **Implement** — write/modify exactly the files specified, following spec library rules
 4. **Verify locally** — run the verification steps listed in `<verification>`
-5. **Atomic commit** — immediately after each completed task:
+5. **Log non-trivial decisions** — before committing, append any architectural decisions to the plan XML
+6. **Atomic commit** — include decision block in the same commit:
 
 ```
 git add -A
@@ -68,6 +69,62 @@ Commit message format: `T-N-M-K: <description>` (e.g., `T-1-2-3: add JWT sign/ve
 
 **Do NOT batch multiple tasks into one commit.**
 **Do NOT commit without running verification first.**
+
+---
+
+## Decision Logging Protocol (v0.2.0)
+
+For every non-trivial implementation choice made during task execution, append a `<decision>`
+block to the plan XML before committing. The plan file is at
+`.threadwork/state/phases/phase-N/plans/PLAN-N-M.xml`.
+
+### What counts as a "non-trivial" choice
+
+Log a decision when you are:
+- Choosing between two or more valid implementation approaches
+- Deviating from the spec's suggested approach with justification
+- Resolving an ambiguity in the task description
+- Making a security or performance trade-off
+
+Do NOT log trivial choices (variable names, formatting, obvious implementations).
+
+### How to append a decision
+
+Using the Bash tool, append to the plan XML before the `</plan>` closing tag:
+
+```xml
+<!-- In the <decisions> block (create it if absent): -->
+<decisions>
+  <decision task="T-N-M-K" timestamp="<ISO>">
+    <choice>Used RS256 (asymmetric) instead of HS256 (symmetric)</choice>
+    <rationale>Project requires token verification by external services that should not hold the signing secret. RS256 allows public-key verification without secret distribution.</rationale>
+    <alternatives-considered>HS256 (rejected: secret sharing required); ES256 (rejected: not supported by existing auth proxy)</alternatives-considered>
+  </decision>
+</decisions>
+```
+
+Or call the state module if available:
+```javascript
+// Using state.js appendDecision():
+appendDecision('PLAN-1-2', 'T-1-2-1', {
+  choice: 'Used RS256 instead of HS256',
+  rationale: 'External services need to verify tokens without holding the signing secret.',
+  alternativesConsidered: 'HS256 (rejected: secret sharing required)'
+});
+```
+
+### Commit protocol with decisions
+
+The `<decisions>` block is staged and committed **together** with the task code — not as a
+separate commit. The git log then shows both the implementation and the rationale in one unit.
+
+### Who reads decisions
+
+- **tw-verifier**: uses decisions to understand why the implementation differs from spec defaults
+- **tw-debugger**: uses decisions to understand trade-offs before diagnosing failures
+- **Handoff Section 4**: auto-populated from `<decisions>` blocks via `readSessionDecisions()`
+
+---
 
 ### Step 4: Write SUMMARY.md
 
