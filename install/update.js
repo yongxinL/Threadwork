@@ -484,6 +484,37 @@ async function runMigrateV030({ cwd, stateDir, isDryRun }) {
 
 async function collectFrameworkUpdates(cwd, isDryRun) {
   const changes = [];
+  const { homedir } = await import('os');
+
+  // Idempotently add git permissions to project-level .claude/settings.json
+  const projectSettingsPath = join(cwd, '.claude', 'settings.json');
+  let projectSettings = {};
+  if (existsSync(projectSettingsPath)) {
+    try { projectSettings = JSON.parse(readFileSync(projectSettingsPath, 'utf8')); } catch { /* create fresh */ }
+  }
+  const THREADWORK_PERMISSIONS = ['Bash(git:*)', 'Bash(node:*)'];
+  projectSettings.permissions = projectSettings.permissions ?? {};
+  projectSettings.permissions.allow = projectSettings.permissions.allow ?? [];
+  const missing = THREADWORK_PERMISSIONS.filter(p => !projectSettings.permissions.allow.includes(p));
+  if (missing.length > 0) {
+    projectSettings.permissions.allow.push(...missing);
+    changes.push(`  .claude/settings.json — git auto-approval added (${missing.join(', ')})`);
+    if (!isDryRun) {
+      mkdirSync(join(cwd, '.claude'), { recursive: true });
+      writeFileSync(projectSettingsPath, JSON.stringify(projectSettings, null, 2), 'utf8');
+    }
+  }
+
+  // Refresh ~/.threadwork/pricing.json with latest template prices
+  const pricingTemplate = join(__dirname, '..', 'templates', 'pricing.json');
+  const pricingDest = join(homedir(), '.threadwork', 'pricing.json');
+  if (existsSync(pricingTemplate)) {
+    changes.push('  ~/.threadwork/pricing.json — refreshed with latest model prices');
+    if (!isDryRun) {
+      mkdirSync(join(homedir(), '.threadwork'), { recursive: true });
+      cpSync(pricingTemplate, pricingDest);
+    }
+  }
 
   // Update hooks
   const hooksSourceDir = join(__dirname, '..', 'hooks');
@@ -514,8 +545,17 @@ async function collectFrameworkUpdates(cwd, isDryRun) {
   if (existsSync(commandsSrcDir)) {
     for (const file of readdirSync(commandsSrcDir)) {
       if (file.endsWith('.md')) {
-        changes.push(`  commands/${file}`);
-        if (!isDryRun) cpSync(join(commandsSrcDir, file), join(commandsDest, file));
+        const destFile = file.replace(/^tw-/, '');
+        changes.push(`  commands/${file} → ${destFile}`);
+        if (!isDryRun) {
+          // Remove stale tw-prefixed duplicate if present
+          const stalePath = join(commandsDest, file);
+          if (file !== destFile && existsSync(stalePath)) {
+            const { rmSync } = await import('fs');
+            rmSync(stalePath);
+          }
+          cpSync(join(commandsSrcDir, file), join(commandsDest, destFile));
+        }
       }
     }
   }
