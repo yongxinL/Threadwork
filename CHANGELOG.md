@@ -7,6 +7,50 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.0] — 2026-03-05
+
+**Five operational gap fixes for real-world v0.2.x deployments:**
+
+### Added
+
+**Upgrade 1: .gitignore Automation at Init**
+- `install/claude-code.js`: `writeGitignoreBlock(projectDir)` — idempotent .gitignore block creation; excludes operational state files (checkpoint, ralph-state, token-log, hook-log, model-switch-log, blueprint-migration), includes worktrees/ and backup/
+- `install/init.js`: Calls `writeGitignoreBlock()` after scaffolding and also creates `~/.threadwork/pricing.json` if absent
+
+**Upgrade 2: 200K Context Default + 1M Reminder**
+- `lib/token-tracker.js`: `getHighContextAgents()` — returns agents that consumed >150K tokens this session (for context advisory)
+- `hooks/pre-tool-use.js`: Complexity check before injection; adds `⚠️ CONTEXT ADVISORY` block when 6+ files / architectural keywords / debugger or planner agents, if `default_context` is `"200k"`
+- `hooks/session-start.js`: Reads `default_context` from project.json; shows `Context model: Sonnet 200K / 1M` in orientation; shows high-context agent advisory if agents exceeded 150K tokens
+- `install/init.js`: New questions for context model (200K vs 1M), cost budget, and model switch policy; calibrates `session_token_budget` to 400K (200K model) or 800K (1M model)
+
+**Upgrade 3: Dual Cost + Context Budget**
+- `lib/token-tracker.js`: `loadPricing()`, `calculateCost(tokens, model)` (60/40 input/output split), `getCostBudget()`, `getCostUsed()`, `getCostRemaining()`, `getCostPercent()`, `getDualBudgetReport()` — full cost+token dual-budget report; `recordUsage()` gains `model` parameter (defaults to `'sonnet'` for backward compat); `resetSessionUsage()` clears `sessionCostUsed`
+- `templates/pricing.json`: Global pricing file template (haiku: $0.80/$4.00/M, sonnet: $3/$15/M, opus: $15/$75/M) — created at init if absent, never overwritten
+- `templates/commands/tw-cost.md`: `/tw:cost` and `/tw:cost history` commands
+
+**Upgrade 4: Model Switch Policy**
+- `lib/model-switcher.js`: New module — `getRecommendedModel(desc, fileCount, agentType)`, `requestSwitch(from, to, reason, policy)` (test mode: `THREADWORK_TEST=1` skips stdin), `logSwitch()`, `getSwitchLog()`, `setSwitchPolicy()`, `getAgentDefault()`, `getAgentDefaults()`; switch log at `.threadwork/state/model-switch-log.json` (excluded from git)
+- `hooks/pre-tool-use.js`: Calls `getRecommendedModel()` and `requestSwitch()` before agent spawn
+- `lib/handoff.js`: Section 6 now includes model switch log summary (reads directly from model-switch-log.json)
+- `templates/commands/tw-model.md`: `/tw:model` and `/tw:model policy` commands
+
+**Upgrade 5: Blueprint Delta Analysis**
+- `lib/blueprint-diff.js`: New analysis-only module — `loadLatestBlueprint()`, `lockBlueprint(content, note)`, `diffBlueprints(old, new)` (section-level keyword heuristics, <1s), `mapChangesToPhases(changes, state, sincePhase)`, `estimateMigrationCosts(mapped, pricing)`, `formatDiffReport(analysis, sincePhase)`, `listBlueprintVersions()`; blueprint files stored as `.threadwork/state/blueprint-vN.md` (committed)
+- `templates/commands/tw-blueprint-diff.md`: `/tw:blueprint-diff` and `/tw:blueprint-diff --since-phase <N>` commands
+- `templates/commands/tw-blueprint-lock.md`: `/tw:blueprint-lock` command
+
+**Migration Command**
+- `install/update.js`: `threadwork update --to v0.3.0` — 12-step idempotent migration; backs up hooks, appends .gitignore block, creates pricing.json, updates hooks/ and lib/, installs 4 new commands, patches project.json (adds `default_context`, `cost_budget`, `model_switch_policy`, recalibrates 800K→400K if 200K context), creates sessions/ directory, patches token-log.json (`sessionCostUsed`)
+
+### Changed
+
+- `install/init.js`: Adds 3 new init questions (context model, cost budget, switch policy); project.json `_version` is now `"0.3.0"` on fresh init; `session_token_budget` defaults to 400K (200K model) or 800K (1M model)
+- `hooks/pre-tool-use.js`: Context injection version bumped to v0.3.0; adds complexity check and model switcher call
+- `hooks/session-start.js`: Shows `default_context` in orientation block; shows high-context agent advisory
+- `lib/token-tracker.js`: `recordUsage()` backward-compatible model parameter added; `DEFAULT_BUDGET` unchanged at 800K (migration recalibrates for existing projects)
+
+---
+
 ## [0.2.0] — 2026-03-03
 
 **Five targeted architectural upgrades informed by two landmark articles on production agent system design:**
