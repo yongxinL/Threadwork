@@ -26,6 +26,10 @@ export async function runUpdate(options) {
     return runMigrateV020({ cwd, stateDir, isDryRun });
   }
 
+  if (targetVersion === 'v0.3.0') {
+    return runMigrateV030({ cwd, stateDir, isDryRun });
+  }
+
   // ── Standard update (no version target) ─────────────────────────────────────
   console.log('\n── Threadwork Update ─────────────────────────────');
   if (isDryRun) console.log('DRY RUN — no changes will be applied\n');
@@ -258,6 +262,218 @@ async function runMigrateV020({ cwd, stateDir, isDryRun }) {
     console.log('  1. Review .threadwork/specs/ — run /tw:specs reindex if spec IDs are missing');
     console.log('  2. Check quality-config.json entropy scanner categories');
     console.log('  3. Confirm store_domains in .threadwork/state/project.json');
+    console.log('  4. Restart Claude Code to load updated hooks\n');
+  } else {
+    console.log('\nDRY RUN — no changes applied.');
+  }
+}
+
+// ── v0.3.0 Migration ──────────────────────────────────────────────────────────
+
+/**
+ * Idempotent v0.2.x → v0.3.0 migration.
+ * Safe to run multiple times — checks _version before each step.
+ */
+async function runMigrateV030({ cwd, stateDir, isDryRun }) {
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║   Threadwork — Migrate to v0.3.0             ║');
+  console.log('╚══════════════════════════════════════════════╝\n');
+
+  if (isDryRun) console.log('DRY RUN — no changes will be applied\n');
+
+  const { homedir } = await import('os');
+  const projectPath = join(stateDir, 'project.json');
+  let proj = {};
+  try {
+    proj = JSON.parse(readFileSync(projectPath, 'utf8'));
+  } catch { /* project.json may not exist */ }
+
+  if (proj._version === '0.3.0') {
+    console.log('✅ Already at v0.3.0 — nothing to do.');
+    return;
+  }
+
+  const applied = [];
+  const skipped = [];
+
+  // ── Step 1: Backup existing hooks ─────────────────────────────────────────
+  const hooksDir = join(cwd, '.threadwork', 'hooks');
+  const backupDir = join(cwd, '.threadwork', 'backup', 'v0.2.x-hooks');
+  if (existsSync(hooksDir)) {
+    applied.push('  [1] Backed up hooks/ → .threadwork/backup/v0.2.x-hooks/');
+    if (!isDryRun) {
+      mkdirSync(backupDir, { recursive: true });
+      cpSync(hooksDir, backupDir, { recursive: true });
+    }
+  } else {
+    skipped.push('  [1] Hooks backup skipped (.threadwork/hooks/ not found)');
+  }
+
+  // ── Step 2: Append .gitignore block (idempotent) ──────────────────────────
+  const { writeGitignoreBlock } = await import('./claude-code.js');
+  applied.push('  [2] Appending Threadwork block to .gitignore (idempotent)');
+  if (!isDryRun) {
+    try {
+      writeGitignoreBlock(cwd);
+    } catch { skipped.push('  [2] .gitignore write failed'); }
+  }
+
+  // ── Step 3: Create ~/.threadwork/pricing.json if absent ──────────────────
+  const pricingPath = join(homedir(), '.threadwork', 'pricing.json');
+  if (!existsSync(pricingPath)) {
+    applied.push(`  [3] Creating ${pricingPath}`);
+    if (!isDryRun) {
+      mkdirSync(join(homedir(), '.threadwork'), { recursive: true });
+      const pricingTemplate = join(__dirname, '..', 'templates', 'pricing.json');
+      if (existsSync(pricingTemplate)) {
+        cpSync(pricingTemplate, pricingPath);
+      } else {
+        writeFileSync(pricingPath, JSON.stringify({
+          _updated: new Date().toISOString().slice(0, 10),
+          _note: 'Prices per million tokens. Edit this file when Anthropic updates pricing.',
+          models: {
+            haiku: { input: 0.80, output: 4.00 },
+            sonnet: { input: 3.00, output: 15.00 },
+            opus: { input: 15.00, output: 75.00 }
+          }
+        }, null, 2), 'utf8');
+      }
+    }
+  } else {
+    skipped.push(`  [3] ${pricingPath} already exists — preserved`);
+  }
+
+  // ── Step 4: Update hooks/ ─────────────────────────────────────────────────
+  const hooksSourceDir = join(__dirname, '..', 'hooks');
+  const hookFiles = ['pre-tool-use.js', 'session-start.js', 'post-tool-use.js', 'subagent-stop.js'];
+  if (existsSync(hooksSourceDir) && existsSync(hooksDir)) {
+    for (const file of hookFiles) {
+      const src = join(hooksSourceDir, file);
+      if (existsSync(src)) {
+        applied.push(`  [4] Updated .threadwork/hooks/${file}`);
+        if (!isDryRun) cpSync(src, join(hooksDir, file));
+      }
+    }
+  } else {
+    skipped.push('  [4] Hook update skipped (source or dest dir missing)');
+  }
+
+  // ── Step 5: Update lib/ with new modules ─────────────────────────────────
+  const libSourceDir = join(__dirname, '..', 'lib');
+  const libDestDir = join(cwd, '.threadwork', 'lib');
+  if (existsSync(libSourceDir)) {
+    applied.push('  [5] Updated .threadwork/lib/ (token-tracker.js, model-switcher.js, blueprint-diff.js, handoff.js)');
+    if (!isDryRun) {
+      mkdirSync(libDestDir, { recursive: true });
+      cpSync(libSourceDir, libDestDir, { recursive: true });
+    }
+  } else {
+    skipped.push('  [5] lib/ update skipped');
+  }
+
+  // ── Step 6: Install new slash commands ────────────────────────────────────
+  const { getCommandsDir, detectRuntime } = await import('../lib/runtime.js');
+  const runtime = detectRuntime();
+  const commandsSrcDir = join(__dirname, '..', 'templates', 'commands');
+  const commandsDest = getCommandsDir(runtime);
+  const newCommands = ['tw-cost.md', 'tw-model.md', 'tw-blueprint-diff.md', 'tw-blueprint-lock.md'];
+  if (existsSync(commandsSrcDir)) {
+    mkdirSync(commandsDest, { recursive: true });
+    for (const f of newCommands) {
+      const src = join(commandsSrcDir, f);
+      if (existsSync(src)) {
+        applied.push(`  [6] Installed command: ${f}`);
+        if (!isDryRun) cpSync(src, join(commandsDest, f.replace(/^tw-/, '')));
+      }
+    }
+  }
+
+  // ── Step 7: Patch project.json with v0.3.0 fields ────────────────────────
+  applied.push('  [7] Patching project.json with v0.3.0 fields');
+  if (!isDryRun) {
+    // Recalibrate session_token_budget if it's 800K and default_context is 200k
+    let budgetNote = '';
+    if (!proj.default_context) {
+      proj.default_context = '200k';
+    }
+    if (!proj.cost_budget) {
+      proj.cost_budget = 5.00;
+    }
+    if (!proj.model_switch_policy) {
+      proj.model_switch_policy = 'notify';
+    }
+    if (!proj.session_token_budget) {
+      proj.session_token_budget = proj.sessionBudget ?? 400_000;
+    }
+    // Recalibrate: if budget is 800K and context is 200k, recalibrate to 400K
+    if ((proj.sessionBudget === 800_000 || proj.session_token_budget === 800_000) &&
+        proj.default_context === '200k') {
+      proj.session_token_budget = 400_000;
+      proj.sessionBudget = 400_000;
+      budgetNote = ' (recalibrated from 800K to 400K for 200K context model)';
+    }
+    proj._version = '0.3.0';
+    proj._updated = new Date().toISOString();
+    writeFileSync(projectPath, JSON.stringify(proj, null, 2));
+    if (budgetNote) applied.push(`  [7b] Token budget recalibrated: 800K → 400K (200K context model)`);
+  }
+
+  // ── Step 8: Create .threadwork/workspace/sessions/ ───────────────────────
+  const sessionsDir = join(cwd, '.threadwork', 'workspace', 'sessions');
+  if (!existsSync(sessionsDir)) {
+    applied.push('  [8] Created .threadwork/workspace/sessions/');
+    if (!isDryRun) mkdirSync(sessionsDir, { recursive: true });
+  } else {
+    skipped.push('  [8] sessions/ already exists');
+  }
+
+  // ── Step 9: Update token-log.json with cost fields ───────────────────────
+  const tokenLogPath = join(stateDir, 'token-log.json');
+  if (existsSync(tokenLogPath)) {
+    try {
+      const tokenLog = JSON.parse(readFileSync(tokenLogPath, 'utf8'));
+      if (!('sessionCostUsed' in tokenLog)) {
+        applied.push('  [9] Patched token-log.json: added sessionCostUsed: 0');
+        if (!isDryRun) {
+          tokenLog.sessionCostUsed = 0;
+          tokenLog._updated = new Date().toISOString();
+          writeFileSync(tokenLogPath, JSON.stringify(tokenLog, null, 2));
+        }
+      } else {
+        skipped.push('  [9] token-log.json already has sessionCostUsed');
+      }
+    } catch { skipped.push('  [9] token-log.json patch skipped (parse error)'); }
+  } else {
+    skipped.push('  [9] token-log.json not found — skipped');
+  }
+
+  // ── Step 10: Add model-switch-log.json to .gitignore ──────────────────────
+  // Already handled by writeGitignoreBlock() in step 2 — no extra action needed
+  skipped.push('  [10] model-switch-log.json excluded via .gitignore (handled in step 2)');
+
+  // ── Step 11: Update THREADWORK.md with new commands ───────────────────────
+  const threadworkMdPath = join(cwd, 'THREADWORK.md');
+  if (!existsSync(threadworkMdPath)) {
+    skipped.push('  [11] THREADWORK.md not found — skipped');
+  } else {
+    applied.push('  [11] THREADWORK.md commands section will be updated at next /tw:new-project');
+    // Actual update deferred — THREADWORK.md is a user document
+  }
+
+  // ── Step 12: Print summary ────────────────────────────────────────────────
+  console.log('Applied:');
+  for (const line of applied) console.log(line);
+  if (skipped.length > 0) {
+    console.log('\nSkipped (already current or not applicable):');
+    for (const line of skipped) console.log(line);
+  }
+
+  if (!isDryRun) {
+    console.log('\n✅ Migration to v0.3.0 complete!\n');
+    console.log('Next steps:');
+    console.log('  1. Run /tw:blueprint-lock to establish your first blueprint baseline');
+    console.log('  2. Review ~/.threadwork/pricing.json and update model prices if needed');
+    console.log('  3. Review the new model_switch_policy setting in project.json');
     console.log('  4. Restart Claude Code to load updated hooks\n');
   } else {
     console.log('\nDRY RUN — no changes applied.');
