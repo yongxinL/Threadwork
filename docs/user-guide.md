@@ -1,6 +1,6 @@
 # Threadwork User Guide
 
-**Version:** 1.0 | **Package:** `threadwork-cc` | **Runtime:** Claude Code / Codex
+**Version:** 1.1 | **Package:** `threadwork-cc` | **Runtime:** Claude Code / Codex
 
 ---
 
@@ -23,6 +23,8 @@
 15. [Starting from an Existing Blueprint](#15-starting-from-an-existing-blueprint)
 16. [Troubleshooting](#16-troubleshooting)
 17. [Team Mode](#17-team-mode)
+18. [Cost & Model Tier Management](#18-cost--model-tier-management)
+19. [Blueprint Evolution](#19-blueprint-evolution)
 
 ---
 
@@ -129,16 +131,19 @@ In your project directory:
 threadwork init
 ```
 
-This walks you through six questions:
+This walks you through nine questions:
 
-| # | Question | Options |
-|---|----------|---------|
+| # | Question | Options / Default |
+|---|----------|--------------------|
 | 1 | Project name | Free text |
 | 2 | Tech stack | Next.js+TS / React+Vite+TS / Express / FastAPI / Other |
 | 3 | Quality thresholds | Coverage % + lint level (strict / standard / relaxed) |
 | 4 | Team mode | Solo / Small team (2–3) / Team (4+) |
 | 5 | Skill tier | Beginner / Advanced (default) / Ninja |
-| 6 | Session token budget | Default: 800K |
+| 6 | Session token budget | Default: 400K (200K model) or 800K (1M model) |
+| 7 | Context model | Sonnet 200K (recommended) / Sonnet 1M |
+| 8 | Per-session cost budget | Default: $5.00 |
+| 9 | Model switch policy | `auto` (ninja) / `notify` (advanced, default) / `approve` (beginner) |
 
 After answering, `threadwork init` will:
 
@@ -146,10 +151,13 @@ After answering, `threadwork init` will:
 - Write `project.json`, `quality-config.json`, `token-log.json`
 - Copy 4 hooks into `.threadwork/hooks/`
 - Register hooks in `~/.claude/settings.json` (Claude Code) or inject into `AGENTS.md` (Codex)
-- Install 23 slash commands to `~/.claude/commands/tw/`
-- Install 8 agent definitions to `~/.claude/agents/`
+- Install 30 slash commands to `~/.claude/commands/tw/`
+- Install 9 agent definitions to `~/.claude/agents/`
 - Copy the project-level guide as `CLAUDE.md` (or `AGENTS.md` for Codex)
 - Copy the starter spec library into `.threadwork/specs/`
+- Creates `~/.threadwork/pricing.json` if absent
+- Writes a `.gitignore` block with operational file exclusions
+- Creates `.threadwork/workspace/sessions/` for session cost history
 
 **Dry run mode** (preview without writing files):
 
@@ -347,6 +355,23 @@ All commands use the `/tw:` prefix. They are installed to `~/.claude/commands/tw
 | `/tw:specs [subcommand]` | Manage the spec library (list, show, search, add, edit, review) |
 | `/tw:journal [subcommand]` | View or search session journals (30-day rolling window) |
 
+### Cost & Model
+
+| Command | Description |
+|---------|-------------|
+| `/tw:cost` | Cost budget dashboard — session total by model tier, projected session end |
+| `/tw:cost history` | Cost across all sessions from committed session-summary files |
+| `/tw:model` | Current model assignments, switch policy, session switch log |
+| `/tw:model policy <mode>` | Change switch policy mid-session (auto/notify/approve) |
+
+### Blueprint Management
+
+| Command | Description |
+|---------|-------------|
+| `/tw:blueprint-diff <file>` | Analyze blueprint changes — categorize (ADDITIVE/MODIFICATIONS/STRUCTURAL) and estimate migration options |
+| `/tw:blueprint-diff --since-phase <N> <file>` | Analyze impact on remaining phases only |
+| `/tw:blueprint-lock [note]` | Snapshot current blueprint as versioned baseline |
+
 ### Configuration
 
 | Command | Description |
@@ -393,7 +418,12 @@ Claude models have a finite context window. Without tracking, you can silently r
 
 ### How budgeting works
 
-The session budget is set at `threadwork init` (default: 800K tokens, which is 80% of Sonnet's 1M context). Each completed task's token usage is recorded in `.threadwork/state/token-log.json`. Usage is estimated using a `chars / 4` heuristic — no API call required.
+Default budget: 400K tokens for Sonnet 200K (configurable at init). 800K for Sonnet 1M.
+Cost budget: $5.00 per session (configurable at init).
+
+Both are tracked simultaneously. Use `/tw:budget` for the dual dashboard or `/tw:cost` for cost-only view.
+
+Each completed task's token usage is recorded in `.threadwork/state/token-log.json`. Usage is estimated using a `chars / 4` heuristic — no API call required. Cost is calculated via `calculateCost()` using a 60/40 input/output split against rates in `~/.threadwork/pricing.json`.
 
 ### Thresholds
 
@@ -412,9 +442,12 @@ The session budget is set at `threadwork init` (default: 800K tokens, which is 8
 ```
 ```
 Token Budget — my-project
-  Used:      312K / 800K (39%)
-  Remaining: 488K
-  Status:    ✅ Healthy
+  Used:      180K / 400K  (45%)   ✅ Healthy
+  Remaining: 220K
+
+Cost Budget — my-project
+  Used:      $0.87 / $5.00 (17%) ✅ Healthy
+  Remaining: $4.13
 ```
 
 **Pre-task estimate:**
@@ -433,6 +466,19 @@ Verdict bands:
 - `✅ Safe` — estimate well within budget
 - `⚠️ Caution` — estimate pushes you past 80%
 - `🚨 Risk` — estimate pushes you past 90%
+
+**Cost dashboard:**
+```
+/tw:cost
+```
+
+Shows cost by model tier (Haiku / Sonnet / Opus), session total, and projected session-end cost.
+
+```
+/tw:cost history
+```
+
+Shows costs across past sessions from committed session-summary files.
 
 **Full token log:**
 ```
@@ -775,16 +821,19 @@ threadwork-cc/
 
 ```json
 {
-  "_version": "1",
-  "_updated": "2026-02-27T12:00:00.000Z",
+  "_version": "0.3.0",
+  "_updated": "2026-03-05T12:00:00.000Z",
   "projectName": "my-project",
   "techStack": "Next.js + TypeScript",
   "currentPhase": 2,
   "currentMilestone": 1,
   "activeTask": "T-2-4",
   "skillTier": "advanced",
-  "sessionBudget": 800000,
+  "sessionBudget": 400000,
   "teamMode": "solo",
+  "default_context": "200k",
+  "cost_budget": 5.00,
+  "model_switch_policy": "notify",
   "qualityConfig": {
     "minCoverage": 80,
     "lintLevel": "strict"
@@ -958,6 +1007,34 @@ All hook output is logged to `.threadwork/workspace/hook-log.json`. Check this f
 cat .threadwork/workspace/hook-log.json | tail -50
 ```
 
+### pricing.json not found
+
+Run `threadwork update --to v0.3.0` to create it, or create it manually at `~/.threadwork/pricing.json`. A template is available at `templates/pricing.json` in the Threadwork package.
+
+### Model switch countdown not appearing
+
+The countdown only shows when `model_switch_policy` is `notify` or `approve`. If policy is `auto`, switches happen silently. Check your current setting:
+
+```bash
+cat .threadwork/state/project.json | grep model_switch_policy
+```
+
+### Blueprint diff shows "No baseline found"
+
+Run `/tw:blueprint-lock` first to snapshot the current project intent. If you have a blueprint document, provide its path:
+
+```
+/tw:blueprint-lock --file docs/blueprint.md
+```
+
+### Cost tracking shows $0.00
+
+Cost tracking requires `recordUsage()` to be called with the `model` parameter. Existing entries in `token-log.json` from before v0.3.0 have no cost data — only new entries after upgrading will show costs.
+
+### session_token_budget still shows 800K after v0.3.0 upgrade
+
+The migration recalibrates 800K → 400K only with user confirmation. If you declined, edit `.threadwork/state/project.json` and set `"session_token_budget": 400000` manually — but only if you are using the Sonnet 200K model.
+
 ---
 
 ## 17. Team Mode
@@ -1094,6 +1171,152 @@ The orchestrator retries up to 3 times with recovery guidance. If the plan is st
 ```
 /tw:execute-phase 2 --plan PLAN-2-3
 ```
+
+---
+
+## 18. Cost & Model Tier Management
+
+### Cost Budget
+
+v0.3.0 adds a cost budget that runs alongside the existing token budget. Both are tracked simultaneously and surfaced via `/tw:budget`.
+
+**How it works:**
+1. `recordUsage(tokens, model)` is called after each tool call
+2. `calculateCost(tokens, model)` applies a 60/40 input/output split against rates in `~/.threadwork/pricing.json`
+3. Cost accumulates in `sessionCostUsed` in `token-log.json`
+4. When cost exceeds `cost_budget` in `project.json`, the same threshold warnings apply as for tokens (80% warning, 90% critical)
+
+**Pricing file (`~/.threadwork/pricing.json`):**
+
+This is a global file shared across all projects. Edit it to reflect current Anthropic pricing if rates change:
+
+```json
+{
+  "haiku":  { "input_per_million": 0.80,  "output_per_million": 4.00 },
+  "sonnet": { "input_per_million": 3.00,  "output_per_million": 15.00 },
+  "opus":   { "input_per_million": 15.00, "output_per_million": 75.00 }
+}
+```
+
+The file is created at init and never overwritten by updates or migrations.
+
+**Commands:**
+- `/tw:budget` — dual dashboard: token line + cost line side by side
+- `/tw:cost` — cost-only view broken down by model tier (Haiku / Sonnet / Opus) with projected session-end cost
+- `/tw:cost history` — cost across all committed session-summary files
+
+### Model Tier Defaults
+
+Each agent has a default model tier:
+
+| Agent | Default Tier |
+|-------|-------------|
+| `tw-planner` | Opus |
+| `tw-researcher` | Opus |
+| `tw-debugger` | Opus |
+| `tw-executor` | Sonnet |
+| `tw-verifier` | Sonnet |
+| `tw-plan-checker` | Sonnet |
+| `tw-dispatch` | Haiku |
+| `tw-spec-writer` | Haiku |
+| `tw-entropy-collector` | Haiku |
+
+### Switch Policies
+
+When task complexity (file count, architectural keywords) suggests a tier upgrade, the model switcher fires. The behavior is governed by `model_switch_policy`:
+
+| Policy | Behavior |
+|--------|----------|
+| `auto` | Switch silently, log to `model-switch-log.json` |
+| `notify` | Show 10-second countdown: "Upgrading tw-executor to Opus. Cancel? (10s)" |
+| `approve` | Explicit y/n prompt required before each switch |
+
+Set at `threadwork init` (question 9) or change anytime mid-session:
+
+```
+/tw:model policy notify
+/tw:model policy auto
+/tw:model policy approve
+```
+
+### Reading the /tw:model Dashboard
+
+`/tw:model` shows:
+- Current model assignments per agent
+- Active switch policy
+- Session switch log: which agent switched, from which tier to which, and why
+
+### Switch Log in Handoffs
+
+The switch log is included in handoff Section 6 so you can audit model tier decisions across sessions. The log file itself (`.threadwork/state/model-switch-log.json`) is excluded from git.
+
+---
+
+## 19. Blueprint Evolution
+
+### What Blueprint Drift Is
+
+Blueprint drift occurs when your project requirements change after implementation has begun. Without a structured process, mid-project blueprint changes often result in:
+- Ad-hoc patches to in-progress plans
+- Inconsistent understanding between sessions
+- Uncounted scope increases
+
+v0.3.0 provides two commands to handle blueprint changes as structured decisions.
+
+### /tw:blueprint-lock — Establishing a Baseline
+
+Before making significant edits to your blueprint or PRD, snapshot the current state:
+
+```
+/tw:blueprint-lock
+/tw:blueprint-lock "baseline before adding multi-tenant support"
+/tw:blueprint-lock --file docs/blueprint.md
+```
+
+This stores a versioned snapshot at `.threadwork/state/blueprint-vN.md` (committed to git). Without a baseline, `/tw:blueprint-diff` cannot produce a meaningful comparison.
+
+**When to lock:**
+- Before any substantial blueprint edit
+- At the start of each milestone as a baseline for that milestone
+- After a scope negotiation that you want to record
+
+### /tw:blueprint-diff — Analyzing Changes
+
+After editing your blueprint, run:
+
+```
+/tw:blueprint-diff docs/blueprint-updated.md
+```
+
+Or for mid-project analysis that only looks at remaining phases:
+
+```
+/tw:blueprint-diff --since-phase 3 docs/blueprint-updated.md
+```
+
+Changes are categorized at the section level:
+
+| Category | Description |
+|----------|-------------|
+| **ADDITIVE** | New sections or requirements with no conflicts to existing work |
+| **MODIFICATIONS** | Changes to existing sections that may affect in-progress phases |
+| **STRUCTURAL** | Fundamental scope, architecture, or technology changes |
+
+For each category, three migration paths are presented with token cost estimates:
+
+| Option | Description |
+|--------|-------------|
+| **Restart** | Restart the affected phase(s) with the updated blueprint |
+| **In-place patch** | Amend the current plan XML and re-execute affected tasks |
+| **Phased adoption** | Continue current phase with the old blueprint; adopt changes in the next phase |
+
+A recommendation is generated at:
+- **15% scope change** — suggests phased adoption or in-place patch
+- **40% scope change** — strongly recommends restart
+
+### Blueprint Migration Decision File
+
+Your choice is written to `.threadwork/state/blueprint-migration.json` (excluded from git). This file does not trigger any implementation — it records the decision for your next session to act on.
 
 ---
 

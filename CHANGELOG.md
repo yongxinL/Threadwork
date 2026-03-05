@@ -49,6 +49,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `hooks/session-start.js`: Shows `default_context` in orientation block; shows high-context agent advisory
 - `lib/token-tracker.js`: `recordUsage()` backward-compatible model parameter added; `DEFAULT_BUDGET` unchanged at 800K (migration recalibrates for existing projects)
 
+### Removed
+
+- `lib/spec-engine.js`: `buildInjectionBlock()` — deprecated since v0.2.0. Use `buildRoutingMap()`.
+
 ---
 
 ## [0.2.0] — 2026-03-03
@@ -101,7 +105,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Deprecated
 
-- `lib/spec-engine.js`: `buildInjectionBlock()` — use `buildRoutingMap()` instead. Will be removed in v0.3.0.
+- `lib/spec-engine.js`: `buildInjectionBlock()` — use `buildRoutingMap()` instead. Removed in v0.3.0.
 
 ### Migration
 
@@ -112,7 +116,7 @@ threadwork update --to v0.2.0
 ```
 
 This is non-destructive. User specs, journals, handoffs, and plan files are preserved exactly.
-See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for the full migration guide.
+See [docs/upgrade.md](docs/upgrade.md) for the full migration guide.
 
 ---
 
