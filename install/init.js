@@ -6,9 +6,10 @@
  */
 
 import { createInterface } from 'readline';
-import { mkdirSync, writeFileSync, existsSync, cpSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, cpSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 import { detectRuntime } from '../lib/runtime.js';
 import { installClaudeCode, writeGitignoreBlock } from './claude-code.js';
 import { installCodex } from './codex.js';
@@ -267,6 +268,35 @@ export async function runInit(options) {
       writeGitignoreBlock(cwd);
       console.log('  ✓ .gitignore updated with Threadwork operational state entries');
     } catch { /* never crash init */ }
+
+    // Create ~/.threadwork/pricing.json if absent (never overwrite)
+    try {
+      const threadworkGlobalDir = join(homedir(), '.threadwork');
+      const pricingPath = join(threadworkGlobalDir, 'pricing.json');
+      if (!existsSync(pricingPath)) {
+        mkdirSync(threadworkGlobalDir, { recursive: true });
+        const pricingTemplate = join(__dirname, '..', 'templates', 'pricing.json');
+        if (existsSync(pricingTemplate)) {
+          cpSync(pricingTemplate, pricingPath);
+        } else {
+          writeFileSync(pricingPath, JSON.stringify({
+            _updated: new Date().toISOString().slice(0, 10),
+            _note: 'Prices per million tokens. Edit this file when Anthropic updates pricing.',
+            models: {
+              haiku: { input: 0.80, output: 4.00 },
+              sonnet: { input: 3.00, output: 15.00 },
+              opus: { input: 15.00, output: 75.00 }
+            }
+          }, null, 2), 'utf8');
+        }
+        console.log(`  ✓ Created ${pricingPath}`);
+      }
+    } catch { /* never crash init */ }
+
+    // Create .threadwork/workspace/sessions/ directory
+    try {
+      mkdirSync(join(cwd, '.threadwork', 'workspace', 'sessions'), { recursive: true });
+    } catch { /* may already exist */ }
 
     // Success summary
     console.log('✅ Threadwork installed!\n');

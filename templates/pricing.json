@@ -1,0 +1,9 @@
+{
+  "_updated": "2025-03-01",
+  "_note": "Prices per million tokens. Edit this file when Anthropic updates pricing.",
+  "models": {
+    "haiku": { "input": 0.80, "output": 4.00 },
+    "sonnet": { "input": 3.00, "output": 15.00 },
+    "opus": { "input": 15.00, "output": 75.00 }
+  }
+}
