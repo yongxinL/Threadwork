@@ -182,6 +182,25 @@ async function main() {
       payload.tool_input.description = injectionPrefix + '\n\n---\n\n' + taskInput.description;
     }
 
+    // v0.3.0: Model switch policy check
+    try {
+      const { getRecommendedModel, getAgentDefault, requestSwitch, logSwitch } =
+        await import('../lib/model-switcher.js');
+      const fileCountMatch = taskDescription.match(/(\d+)\s+files?/i);
+      const fileCount = fileCountMatch ? parseInt(fileCountMatch[1], 10) : 0;
+      const recommendedModel = getRecommendedModel(taskDescription, fileCount, agentType);
+      const agentDefault = getAgentDefault(agentType);
+      if (recommendedModel !== agentDefault) {
+        const { approved } = await requestSwitch(agentDefault, recommendedModel,
+          `Task complexity: ${fileCount >= 6 ? '6+ files' : 'keywords/agent type'}`, undefined);
+        if (approved) {
+          logSwitch(agentDefault, recommendedModel, `agent-spawn-${Date.now()}`,
+            `auto-recommended for ${agentType}`, false);
+          logHook('INFO', `pre-tool-use: model switch ${agentDefault} → ${recommendedModel} for ${agentType}`);
+        }
+      }
+    } catch { /* model-switcher errors must never block execution */ }
+
     logHook('INFO', `pre-tool-use: injected routing map (${routingMapTokens} tokens) | tier=${tier} | task="${taskDescription.slice(0, 60)}"`);
 
     process.stdout.write(JSON.stringify(payload));
