@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync, existsSync, cpSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { detectRuntime } from '../lib/runtime.js';
-import { installClaudeCode } from './claude-code.js';
+import { installClaudeCode, writeGitignoreBlock } from './claude-code.js';
 import { installCodex } from './codex.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -231,6 +231,12 @@ export async function runInit(options) {
     } else if (runtime === 'codex') {
       await installCodex({ cwd, __dirname });
     }
+
+    // Write .gitignore block (idempotent)
+    try {
+      writeGitignoreBlock(cwd);
+      console.log('  ✓ .gitignore updated with Threadwork operational state entries');
+    } catch { /* never crash init */ }
 
     // Success summary
     console.log('✅ Threadwork installed!\n');
