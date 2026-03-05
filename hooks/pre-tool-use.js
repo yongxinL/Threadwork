@@ -117,6 +117,7 @@ async function main() {
     // Task() injection path — v0.2.0: routing map instead of full spec injection
     const taskInput = payload.tool_input ?? payload.input ?? {};
     const taskDescription = taskInput.prompt ?? taskInput.description ?? taskInput.task ?? '';
+    const agentType = taskInput.subagent_type ?? taskInput.agent_type ?? '';
 
     // Phase context from state (best-effort)
     let currentPhase = 1;
@@ -124,6 +125,29 @@ async function main() {
       const { getPhase } = await import('../lib/state.js');
       currentPhase = getPhase();
     } catch { /* state may not exist */ }
+
+    // v0.3.0: Context advisory for high-complexity tasks when using 200K default
+    let contextAdvisory = '';
+    try {
+      const { readState } = await import('../lib/state.js');
+      const projectState = readState();
+      const defaultContext = projectState.default_context ?? '200k';
+      if (defaultContext === '200k') {
+        const descLower = taskDescription.toLowerCase();
+        const fileCountMatch = taskDescription.match(/(\d+)\s+files?/i);
+        const fileCount = fileCountMatch ? parseInt(fileCountMatch[1], 10) : 0;
+        const highComplexityAgent = agentType === 'tw-debugger' || agentType === 'tw-planner';
+        const complexKeywords = ['refactor', 'architecture', 'migrate', 'redesign'];
+        const hasComplexKeyword = complexKeywords.some(k => descLower.includes(k));
+        if (fileCount >= 6 || highComplexityAgent || hasComplexKeyword) {
+          contextAdvisory = [
+            '⚠️ CONTEXT ADVISORY: This task has high complexity indicators (6+ files / architectural).',
+            'If you encounter context limit issues, consider asking the user to switch to the 1M context model.',
+            'Current default: Sonnet 200K.'
+          ].join('\n');
+        }
+      }
+    } catch { /* project.json may not exist */ }
 
     // Build compact routing map (~150 tokens) instead of full spec injection
     const routingMap = buildRoutingMap(taskDescription, currentPhase);
@@ -137,7 +161,8 @@ async function main() {
 
     // Compose full injection prefix
     const injectionParts = [
-      `<!-- Threadwork Context Injection (v0.2.0) -->`,
+      `<!-- Threadwork Context Injection (v0.3.0) -->`,
+      contextAdvisory ? contextAdvisory : '',
       tierInstructions,
       '',
       budgetDashboard,
@@ -156,6 +181,25 @@ async function main() {
     } else if (taskInput.description !== undefined) {
       payload.tool_input.description = injectionPrefix + '\n\n---\n\n' + taskInput.description;
     }
+
+    // v0.3.0: Model switch policy check
+    try {
+      const { getRecommendedModel, getAgentDefault, requestSwitch, logSwitch } =
+        await import('../lib/model-switcher.js');
+      const fileCountMatch = taskDescription.match(/(\d+)\s+files?/i);
+      const fileCount = fileCountMatch ? parseInt(fileCountMatch[1], 10) : 0;
+      const recommendedModel = getRecommendedModel(taskDescription, fileCount, agentType);
+      const agentDefault = getAgentDefault(agentType);
+      if (recommendedModel !== agentDefault) {
+        const { approved } = await requestSwitch(agentDefault, recommendedModel,
+          `Task complexity: ${fileCount >= 6 ? '6+ files' : 'keywords/agent type'}`, undefined);
+        if (approved) {
+          logSwitch(agentDefault, recommendedModel, `agent-spawn-${Date.now()}`,
+            `auto-recommended for ${agentType}`, false);
+          logHook('INFO', `pre-tool-use: model switch ${agentDefault} → ${recommendedModel} for ${agentType}`);
+        }
+      }
+    } catch { /* model-switcher errors must never block execution */ }
 
     logHook('INFO', `pre-tool-use: injected routing map (${routingMapTokens} tokens) | tier=${tier} | task="${taskDescription.slice(0, 60)}"`);
 

@@ -6,11 +6,12 @@
  */
 
 import { createInterface } from 'readline';
-import { mkdirSync, writeFileSync, existsSync, cpSync, readdirSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, cpSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
 import { detectRuntime } from '../lib/runtime.js';
-import { installClaudeCode } from './claude-code.js';
+import { installClaudeCode, writeGitignoreBlock } from './claude-code.js';
 import { installCodex } from './codex.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -104,24 +105,50 @@ export async function runInit(options) {
     const tierMap = { '1': 'beginner', '2': 'advanced', '3': 'ninja' };
     const skillTier = tierMap[tierAnswer.trim() || '2'] ?? 'advanced';
 
-    // ── Question 6: Session token budget ──────────────────────────────────
-    console.log('\n6. Session token budget:');
-    console.log('   Default is 800K (80% of Sonnet\'s 1M context)');
-    console.log('   Lower if using a smaller model; higher if using Opus with extended context');
-    const budgetAnswer = await ask(rl, '   Budget in thousands (default: 800): ');
-    const sessionBudget = (parseInt(budgetAnswer.trim() || '800', 10) || 800) * 1000;
+    // ── Question 6: Context model ──────────────────────────────────────────
+    console.log('\n6. Which Claude context model will you use by default?');
+    console.log('   1) Sonnet 200K — standard, recommended');
+    console.log('   2) Sonnet 1M   — extended context, higher cost');
+    const contextAnswer = await ask(rl, '   Choice (default: 1): ');
+    const defaultContext = contextAnswer.trim() === '2' ? '1m' : '200k';
+
+    // ── Question 7: Session token budget (calibrated per context choice) ──
+    const defaultBudgetK = defaultContext === '1m' ? 800 : 400;
+    console.log(`\n7. Session token budget (calibrated for ${defaultContext === '1m' ? '1M' : '200K'} model):`);
+    console.log(`   Recommended default: ${defaultBudgetK}K`);
+    const budgetAnswer = await ask(rl, `   Budget in thousands (default: ${defaultBudgetK}): `);
+    const sessionBudget = (parseInt(budgetAnswer.trim() || String(defaultBudgetK), 10) || defaultBudgetK) * 1000;
+
+    // ── Question 8: Cost budget ────────────────────────────────────────────
+    console.log('\n8. Per-session cost budget:');
+    const costAnswer = await ask(rl, '   Dollar amount (default: 5.00): ');
+    const costBudget = parseFloat(costAnswer.trim() || '5.00') || 5.00;
+
+    // ── Question 9: Model switch policy ───────────────────────────────────
+    console.log('\n9. Model switch policy (when Threadwork recommends a model tier change):');
+    console.log('   1) Auto    — switch automatically, notify after the fact');
+    console.log('   2) Notify  — propose switch with 10-second countdown [RECOMMENDED]');
+    console.log('   3) Approve — always ask for explicit confirmation');
+    const switchPolicyDefaults = { 'ninja': '1', 'advanced': '2', 'beginner': '3' };
+    const switchPolicyDefault = switchPolicyDefaults[skillTier] ?? '2';
+    const switchPolicyAnswer = await ask(rl, `   Choice (default: ${switchPolicyDefault}): `);
+    const switchPolicyMap = { '1': 'auto', '2': 'notify', '3': 'approve' };
+    const modelSwitchPolicy = switchPolicyMap[switchPolicyAnswer.trim() || switchPolicyDefault] ?? 'notify';
 
     rl.close();
 
     // ── Confirm ───────────────────────────────────────────────────────────
     console.log('\n── Summary ──────────────────────────────────');
-    console.log(`  Project:      ${projectName}`);
-    console.log(`  Stack:        ${techStack}`);
-    console.log(`  Coverage:     ${minCoverage}%  |  Lint: ${lintLevel}`);
-    console.log(`  Team mode:    ${teamMode}${teamMode !== 'legacy' ? ` (max workers: ${maxWorkers})` : ''}`);
-    console.log(`  Skill tier:   ${skillTier}`);
-    console.log(`  Token budget: ${(sessionBudget / 1000).toFixed(0)}K`);
-    console.log(`  Runtime:      ${runtime}`);
+    console.log(`  Project:        ${projectName}`);
+    console.log(`  Stack:          ${techStack}`);
+    console.log(`  Coverage:       ${minCoverage}%  |  Lint: ${lintLevel}`);
+    console.log(`  Team mode:      ${teamMode}${teamMode !== 'legacy' ? ` (max workers: ${maxWorkers})` : ''}`);
+    console.log(`  Skill tier:     ${skillTier}`);
+    console.log(`  Context model:  ${defaultContext === '1m' ? 'Sonnet 1M' : 'Sonnet 200K'}`);
+    console.log(`  Token budget:   ${(sessionBudget / 1000).toFixed(0)}K`);
+    console.log(`  Cost budget:    $${costBudget.toFixed(2)}`);
+    console.log(`  Switch policy:  ${modelSwitchPolicy}`);
+    console.log(`  Runtime:        ${runtime}`);
     console.log('─────────────────────────────────────────────\n');
 
     if (isDryRun) {
@@ -148,7 +175,7 @@ export async function runInit(options) {
 
     // Write project.json
     const projectState = {
-      _version: '1',
+      _version: '0.3.0',
       _updated: new Date().toISOString(),
       projectName,
       techStack,
@@ -157,6 +184,10 @@ export async function runInit(options) {
       activeTask: null,
       skillTier,
       sessionBudget,
+      session_token_budget: sessionBudget,
+      default_context: defaultContext,
+      cost_budget: costBudget,
+      model_switch_policy: modelSwitchPolicy,
       teamMode,
       maxWorkers,
       qualityConfig: { minCoverage, lintLevel }
@@ -231,6 +262,41 @@ export async function runInit(options) {
     } else if (runtime === 'codex') {
       await installCodex({ cwd, __dirname });
     }
+
+    // Write .gitignore block (idempotent)
+    try {
+      writeGitignoreBlock(cwd);
+      console.log('  ✓ .gitignore updated with Threadwork operational state entries');
+    } catch { /* never crash init */ }
+
+    // Create ~/.threadwork/pricing.json if absent (never overwrite)
+    try {
+      const threadworkGlobalDir = join(homedir(), '.threadwork');
+      const pricingPath = join(threadworkGlobalDir, 'pricing.json');
+      if (!existsSync(pricingPath)) {
+        mkdirSync(threadworkGlobalDir, { recursive: true });
+        const pricingTemplate = join(__dirname, '..', 'templates', 'pricing.json');
+        if (existsSync(pricingTemplate)) {
+          cpSync(pricingTemplate, pricingPath);
+        } else {
+          writeFileSync(pricingPath, JSON.stringify({
+            _updated: new Date().toISOString().slice(0, 10),
+            _note: 'Prices per million tokens. Edit this file when Anthropic updates pricing.',
+            models: {
+              haiku: { input: 0.80, output: 4.00 },
+              sonnet: { input: 3.00, output: 15.00 },
+              opus: { input: 15.00, output: 75.00 }
+            }
+          }, null, 2), 'utf8');
+        }
+        console.log(`  ✓ Created ${pricingPath}`);
+      }
+    } catch { /* never crash init */ }
+
+    // Create .threadwork/workspace/sessions/ directory
+    try {
+      mkdirSync(join(cwd, '.threadwork', 'workspace', 'sessions'), { recursive: true });
+    } catch { /* may already exist */ }
 
     // Success summary
     console.log('✅ Threadwork installed!\n');

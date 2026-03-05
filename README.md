@@ -6,6 +6,20 @@ Threadwork weaves tasks, specs, and sessions into a single thread — a structur
 
 ---
 
+## What's New in v0.3.0
+
+Five operational gap fixes for real-world v0.2.x deployments:
+
+| Upgrade | What changed | Impact |
+|---------|-------------|--------|
+| **.gitignore automation** | `threadwork init` writes a delimited block excluding operational files (checkpoint, token-log, switch-log). Memory files (journals, handoffs, specs, plans) are committed. | No more accidental commits of operational state |
+| **200K context default** | `default_context` in project.json. Init question for model choice. Session token budget default recalibrated: 400K for 200K model, 800K for 1M. Complexity advisory injected for 6+ file / architectural tasks. | Cost-appropriate defaults; context limit warnings before you hit them |
+| **Dual cost + token budget** | Cost budget ($5.00 default) tracked alongside tokens. Global `~/.threadwork/pricing.json` (user-editable). `calculateCost()` uses 60/40 I/O split. `/tw:budget` now shows both token and cost lines. | Know what sessions actually cost in dollars, not just tokens |
+| **Model switch policy** | New `lib/model-switcher.js`. Three policies: auto/notify/approve. Agent defaults: planner/researcher/debugger→Opus, executor/verifier/checker→Sonnet, dispatch/spec-writer/entropy→Haiku. Switch log in handoff Section 6. | Full audit trail of which model ran which task; approval workflow for tier changes |
+| **Blueprint delta analysis** | `lib/blueprint-diff.js` — section-level deterministic diff. ADDITIVE / MODIFICATIONS / STRUCTURAL categories. Three migration options (restart/in-place/phased) with cost estimates. Recommendation at 15%/40% thresholds. | Mid-project blueprint changes become structured decisions, not ad-hoc patches |
+
+**Upgrading from v0.2.x?** Run `threadwork update --to v0.3.0` — non-destructive, idempotent. See [docs/upgrade.md](docs/upgrade.md).
+
 ## What's New in v0.2.0
 
 Five targeted upgrades informed by LangChain's harness taxonomy and OpenAI's harness engineering report:
@@ -18,7 +32,7 @@ Five targeted upgrades informed by LangChain's harness taxonomy and OpenAI's har
 | **Cross-Session Memory Store** | Global `~/.threadwork/store/` persists high-confidence patterns, edge cases, and conventions across projects. Promoted from spec proposals automatically. | Every project benefits from all previous projects |
 | **Execution Plan Decision Logs** | Executor agents append `<decisions>` blocks to plan XML as they work, capturing _why_ choices were made. Handoff Section 4 is now auto-populated from these. | Architectural decisions survive session boundaries |
 
-**Upgrading from v0.1.x?** Run `threadwork update --to v0.2.0` — non-destructive, idempotent. See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md).
+**Upgrading from v0.1.x?** Run `threadwork update --to v0.2.0` — non-destructive, idempotent. See [docs/upgrade.md](docs/upgrade.md).
 
 ---
 
@@ -30,7 +44,7 @@ npx threadwork-cc@latest
 
 # 2. In your project directory
 threadwork init
-#   → Asks 6 questions (name, stack, quality thresholds, team mode, skill tier, session budget)
+#   → Asks 9 questions (including context model, cost budget, and switch policy)
 #   → Scaffolds .threadwork/, registers 4 hooks, installs commands and agents
 
 # 3. Start Claude Code in your project
@@ -71,7 +85,7 @@ npm install
 # 3. Verify everything passes
 npm run check        # syntax check all JS files
 npm test             # unit tests
-npm run test:all     # unit + integration tests (184 tests)
+npm run test:all     # unit + integration tests (181 tests)
 
 # 4. Test hooks manually
 node hooks/test-harness.js all
@@ -214,6 +228,21 @@ Team mode runs multiple agents simultaneously — token consumption scales with 
 /tw:entropy show <N>      Show entropy report for a specific wave
 ```
 
+### Cost & Model
+```
+/tw:cost                  Cost budget dashboard — by model tier, session total, projected end
+/tw:cost history          Cost across all sessions from committed session-summary files
+/tw:model                 Current model assignments, switch policy, session switch log
+/tw:model policy <mode>   Change switch policy mid-session (auto/notify/approve)
+```
+
+### Blueprint Management
+```
+/tw:blueprint-diff <file>                    Analyze blueprint changes — categorize and estimate migration
+/tw:blueprint-diff --since-phase <N> <file>  Impact on remaining phases only
+/tw:blueprint-lock [note]                    Snapshot current blueprint as versioned baseline
+```
+
 ### Configuration
 ```
 /tw:tier [set <tier>]                  View or change skill tier
@@ -257,7 +286,8 @@ The tier is injected into every subagent prompt — it applies uniformly across 
 
 ## Token Budget System
 
-Default budget: 800K tokens (80% of Sonnet's 1M context). Configurable at init.
+Default budget: 400K tokens (Sonnet 200K model) or 800K (Sonnet 1M model). Configurable at init.
+Cost budget: $5.00 per session (configurable at init). Tracked via `~/.threadwork/pricing.json`.
 
 ```
 < 80%  ✅ Healthy — normal operation
@@ -383,23 +413,59 @@ This skips all seven clarifying questions and instead reads your document to gen
 
 ---
 
+## Model Tier Management
+
+v0.3.0 adds runtime model tier enforcement via `lib/model-switcher.js`. Each agent has a default tier (Opus for planning/research/debug, Sonnet for execution/verification, Haiku for coordination). When task complexity warrants a tier upgrade, the switcher fires according to your policy.
+
+**Three policies:**
+- `auto` — switches happen silently and are logged
+- `notify` — a 10-second countdown appears before any switch; press Ctrl+C to cancel
+- `approve` — an explicit y/n prompt before each switch
+
+Set policy at init (question 9) or change anytime mid-session:
+
+```
+/tw:model policy notify
+/tw:model policy auto
+/tw:model policy approve
+```
+
+Use `/tw:model` to see current model assignments and the session switch log. The switch log is included in handoff Section 6.
+
+---
+
+## Blueprint Evolution
+
+When your project requirements change mid-implementation, `/tw:blueprint-diff` gives you structured options instead of ad-hoc patching.
+
+Changes are categorized automatically:
+- **ADDITIVE** — new requirements with no conflicts to existing work
+- **MODIFICATIONS** — changes that may affect in-progress phases
+- **STRUCTURAL** — scope, architecture, or technology changes requiring assessment
+
+For each change category, three migration paths are estimated (restart / in-place patch / phased adoption). A recommendation is made at 15% and 40% scope change thresholds.
+
+Run `/tw:blueprint-lock` before making blueprint edits to establish a clean baseline. Then run `/tw:blueprint-diff <updated-file>` to see the structured analysis before deciding how to proceed.
+
+```
+/tw:blueprint-lock                         # snapshot current state
+/tw:blueprint-diff docs/blueprint-v2.md   # analyze changes
+/tw:blueprint-diff --since-phase 3 docs/blueprint-v2.md  # analyze impact on remaining phases only
+```
+
+---
+
 ## Upgrading from v0.1.x
 
 ```bash
-# In your project directory
+# Upgrade to v0.2.0
 threadwork update --to v0.2.0
+
+# Then upgrade to v0.3.0
+threadwork update --to v0.3.0
 ```
 
-What it does (idempotent — safe to run multiple times):
-1. Backs up your current hooks to `.threadwork/backup/v0.1.x-hooks/`
-2. Updates all framework files (hooks, lib, commands, agents)
-3. Creates `.threadwork/store/` with `store-index.json`
-4. Patches `project.json` with `_version: "0.2.0"` and `store_enabled: true`
-5. Patches `token-log.json` to add `spec_fetch_tokens` field
-6. Patches `ralph-state.json` to add `remediation_log` field
-7. Runs `generateSpecIds()` to add routing map IDs to your spec files
-
-User specs, journals, handoffs, and plan files are **never modified**. See [docs/upgrade-guide-v0.2.0.md](docs/upgrade-guide-v0.2.0.md) for full details and rollback instructions.
+Both commands are idempotent — safe to run multiple times. User specs, journals, handoffs, and plan files are **never modified**. See [docs/upgrade.md](docs/upgrade.md) for the full migration guide including step-by-step details and troubleshooting.
 
 ---
 

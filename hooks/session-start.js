@@ -68,6 +68,7 @@ async function main() {
     let currentMilestone = 'unknown';
     let activeTask = 'None';
     let skillTier = 'advanced';
+    let defaultContext = '200k';
 
     try {
       const state = readState();
@@ -76,6 +77,7 @@ async function main() {
       currentMilestone = state.currentMilestone ?? 'unknown';
       activeTask = state.activeTask ?? 'None';
       skillTier = state.skillTier ?? 'advanced';
+      defaultContext = state.default_context ?? '200k';
     } catch { /* project not yet initialized */ }
 
     if (minimal) {
@@ -105,10 +107,24 @@ async function main() {
       `## Threadwork — Session Context`,
       `**Project**: ${projectName} | **Phase**: ${currentPhase} | **Milestone**: ${currentMilestone}`,
       `**Active task**: ${activeTask}`,
+      `**Context model**: ${defaultContext === '1m' ? 'Sonnet 1M (extended)' : 'Sonnet 200K (standard)'}`,
       '',
       `${budgetDashboard}`,
       ''
     ];
+
+    // v0.3.0: High-context agent advisory
+    try {
+      const { getHighContextAgents } = await import('../lib/token-tracker.js');
+      const highContextAgents = getHighContextAgents();
+      if (highContextAgents.length > 0 && defaultContext === '200k') {
+        const advisory = highContextAgents.slice(0, 2).map(a =>
+          `Context advisory: Agent ${a.agentType} used ~${Math.round(a.tokens / 1000)}K tokens last session.`
+        );
+        advisory.push('Approaching 200K context limit. Consider 1M model for complex planning phases.');
+        parts.push(...advisory, '');
+      }
+    } catch { /* token-tracker may not be initialized */ }
 
     if (hasCheckpoint) {
       let cp = {};

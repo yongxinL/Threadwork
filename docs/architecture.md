@@ -29,7 +29,7 @@ Under LangChain's three-tier taxonomy (Framework → Runtime → Harness), Threa
 
 ---
 
-## Hook Execution Flow (v0.2.0)
+## Hook Execution Flow (v0.3.0)
 
 Threadwork registers 4 hooks in `~/.claude/settings.json`. Each fires at a specific point in Claude Code's execution cycle.
 
@@ -51,6 +51,15 @@ User starts Claude Code session
 │     (top 3 entries,     │
 │     skipped if >80%     │
 │     budget used)        │
+│  5. Read default_context│
+│     from project.json   │
+│     (200k/1m)           │
+│  6. Inject cost budget  │
+│     status              │
+│  7. High-context agent  │
+│     advisory (if any    │
+│     agent > 150K tokens │
+│     last session)       │
 └─────────────────────────┘
          │
          ▼
@@ -68,6 +77,17 @@ User issues a command (e.g. /tw:execute-phase 1)
 │  2. Inject routing map  │
 │     + tier instruction  │
 │     + [TOKEN: ...] line │
+│  3. Complexity check    │
+│     (6+ files / arch    │
+│     keywords / debugger │
+│     or planner agents)  │
+│     → CONTEXT ADVISORY  │
+│     if default_context  │
+│     is "200k"           │
+│  4. Model switch check  │
+│     getRecommendedModel()│
+│     requestSwitch() per │
+│     policy setting      │
 │                         │
 │  On spec_fetch calls:   │
 │  1. Read spec by ID     │
@@ -96,6 +116,12 @@ User issues a command (e.g. /tw:execute-phase 1)
 │     check spec proposal │
 │     confidence → Store  │
 │     promotion pipeline  │
+│  6. On PHASE_VERIFIED:  │
+│     extract token-      │
+│     summary.json        │
+│     (committed per-phase│
+│     cost + token        │
+│     variance summary)   │
 └─────────────────────────┘
          │
          ▼  Subagent completes
@@ -269,19 +295,85 @@ Derived from LangChain's three-source context model:
 
 ---
 
-## Nine-Agent Roster (v0.2.0)
+## Dual Budget Model (v0.3.0)
 
-| Agent | Model | Context | Trigger |
-|-------|-------|---------|---------|
-| `tw-planner` | Opus (Quality) | Large (fresh 200K) | `/tw:plan-phase N` |
-| `tw-researcher` | Opus (Quality) | Large (fresh 200K) | `/tw:discuss-phase N` |
-| `tw-plan-checker` | Sonnet (Balanced) | Medium | Auto, after planning |
-| `tw-executor` | Sonnet (Balanced) | Large (fresh 200K) | Per-plan, per wave |
-| `tw-verifier` | Sonnet (Balanced) | Medium | `/tw:verify-phase N` |
-| `tw-debugger` | Opus (Quality) | Large (fresh 200K) | `/tw:debug` |
-| `tw-dispatch` | Haiku (Budget) | Small | Wave orchestration |
-| `tw-spec-writer` | Haiku (Budget) | Small | Pattern detection |
-| `tw-entropy-collector` | Haiku (Budget) | Medium (diff-scoped) | Post-wave completion |
+Token budget and cost budget are tracked simultaneously and surfaced in the same dashboard.
+
+```
+Token Budget   Used: 180K / 400K  (45%)   ✅ Healthy
+Cost Budget    Used: $0.87 / $5.00 (17%)  ✅ Healthy
+```
+
+**Data flow:**
+```
+recordUsage(tokens, model)
+    │
+    ├── Token: accumulated in token-log.json sessionUsed
+    │
+    └── Cost:  calculateCost(tokens, model)
+                    │
+                    └── loads ~/.threadwork/pricing.json
+                        applies 60/40 input/output split
+                        → getCostUsed() → getCostRemaining()
+```
+
+`getDualBudgetReport()` powers both `/tw:budget` (dual view) and `/tw:cost` (cost-only view with per-tier breakdown). Pricing is loaded from `~/.threadwork/pricing.json` — user-editable, never overwritten by migrations.
+
+---
+
+## Model Switch Policy (v0.3.0)
+
+```
+Task() spawn
+    │
+    ▼
+getRecommendedModel(desc, fileCount, agentType)
+    │
+    ├── fileCount ≥ 6 OR architectural keywords → Opus
+    ├── agentType is planner/researcher/debugger → Opus (default)
+    ├── agentType is executor/verifier/checker  → Sonnet (default)
+    └── agentType is dispatch/spec-writer/entropy → Haiku (default)
+    │
+    ▼
+Recommended tier differs from agent default?
+    │
+    ├── No  → proceed, no switch needed
+    │
+    └── Yes → requestSwitch(from, to, reason, policy)
+                    │
+                    ├── policy: "auto"    → logSwitch() silently, proceed
+                    │
+                    ├── policy: "notify"  → show 10-second countdown
+                    │                       "Upgrading to Opus. Cancel? (10s)"
+                    │                       → proceed if not cancelled
+                    │
+                    └── policy: "approve" → show explicit y/n prompt
+                                            → proceed only if approved
+    │
+    ▼
+logSwitch() → .threadwork/state/model-switch-log.json
+    │          (excluded from git)
+    ▼
+Handoff Section 6: switch log summary included
+```
+
+---
+
+## Nine-Agent Roster (v0.3.0)
+
+| Agent | Model | Context | Default Tier | Trigger |
+|-------|-------|---------|--------------|---------|
+| `tw-planner` | Opus (Quality) | Large (fresh 200K) | Opus | `/tw:plan-phase N` |
+| `tw-researcher` | Opus (Quality) | Large (fresh 200K) | Opus | `/tw:discuss-phase N` |
+| `tw-plan-checker` | Sonnet (Balanced) | Medium | Sonnet | Auto, after planning |
+| `tw-executor` | Sonnet (Balanced) | Large (fresh 200K) | Sonnet | Per-plan, per wave |
+| `tw-verifier` | Sonnet (Balanced) | Medium | Sonnet | `/tw:verify-phase N` |
+| `tw-debugger` | Opus (Quality) | Large (fresh 200K) | Opus | `/tw:debug` |
+| `tw-dispatch` | Haiku (Budget) | Small | Haiku | Wave orchestration |
+| `tw-spec-writer` | Haiku (Budget) | Small | Haiku | Pattern detection |
+| `tw-entropy-collector` | Haiku (Budget) | Medium (diff-scoped) | Haiku | Post-wave completion |
+
+The model-switcher can upgrade any agent's tier at runtime based on task complexity. The switch is governed by `model_switch_policy` in `project.json`.
 
 All agents receive:
 1. **Spec routing map** — compact map + fetchable spec IDs (replaces full spec injection)
@@ -366,17 +458,20 @@ Threadwork source repository:
 │   ├── spec-engine.js         buildRoutingMap(), fetchSpecById(), proposeSpecUpdate()
 │   ├── state.js               Project state + plan XML + appendDecision()
 │   ├── handoff.js             10-section handoff generation
-│   ├── token-tracker.js       Budget tracking + spec_fetch_tokens
+│   ├── token-tracker.js       Budget tracking + spec_fetch_tokens + cost tracking
 │   ├── entropy-collector.js   isWaveComplete(), writeEntropyReport()
 │   ├── store.js               Cross-session Store CRUD
+│   ├── model-switcher.js      Model tier management + switch policy (v0.3.0)
+│   ├── blueprint-diff.js      Blueprint delta analysis (v0.3.0)
 │   ├── git.js                 Git utilities (branch, SHA, diff)
 │   └── runtime.js             Claude Code / Codex detection
 ├── install/
-│   ├── init.js                threadwork init — interactive scaffold
-│   └── update.js              threadwork update (+ --to v0.2.0 migration)
+│   ├── init.js                threadwork init — interactive scaffold (9 questions)
+│   └── update.js              threadwork update (+ --to v0.2.0 / --to v0.3.0 migrations)
 └── templates/
     ├── agents/                Agent prompts (tw-planner, tw-executor, ..., tw-entropy-collector)
-    ├── commands/              Slash command prompts
+    ├── commands/              30 slash command markdown files  ← was 23
+    ├── pricing.json           Global pricing template (v0.3.0)
     ├── specs/                 Starter spec templates
     └── AGENTS.md              Installed as CLAUDE.md (Claude Code) or AGENTS.md (Codex)
 ```
