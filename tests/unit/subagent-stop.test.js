@@ -4,9 +4,9 @@
  * Run: node --test tests/unit/subagent-stop.test.js
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, appendFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
 // Temp dir for state isolation
@@ -112,4 +112,8 @@ describe('remediation_log is preserved when ralph-state is cleared', () => {
     assert.ok(hookLog.includes('signal-a'));
     assert.ok(hookLog.includes('signal-b'));
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

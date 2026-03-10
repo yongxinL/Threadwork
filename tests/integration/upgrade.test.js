@@ -3,7 +3,7 @@
  * Tests idempotency, backup creation, store directory, spec preservation, version bump.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -175,4 +175,8 @@ describe('threadwork update --to v0.2.0 migration', () => {
 
     try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

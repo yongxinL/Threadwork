@@ -3,7 +3,7 @@
  * Run: node --test tests/unit/token-tracker.test.js
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -173,4 +173,8 @@ describe('formatBudgetDashboard', () => {
     const dash = formatBudgetDashboard();
     assert.ok(dash.includes('🚨') || dash.includes('CRITICAL'));
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

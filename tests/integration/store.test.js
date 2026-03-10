@@ -3,7 +3,7 @@
  * Tests writeEntry, searchStore, and promoteToStore end-to-end.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -102,4 +102,8 @@ describe('promoteToStore integration', () => {
 
     try { rmSync(proposalsDir, { recursive: true, force: true }); } catch { /* ignore */ }
   });
+});
+
+after(() => {
+  try { rmSync(tmpStore, { recursive: true, force: true }); } catch { /* ignore */ }
 });
