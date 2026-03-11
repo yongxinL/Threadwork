@@ -3,7 +3,7 @@
  * Tests buildRoutingMap, fetchSpecById, token tracking, and getRoutingMapTokens.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -92,4 +92,8 @@ describe('spec fetch token tracking', () => {
     const total = getSpecFetchTotal();
     assert.ok(total >= 770, `Spec fetch total should be >= 770, got ${total}`);
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

@@ -307,6 +307,7 @@ export async function runInit(options) {
     console.log(`  🪝 4 hooks               — session-start, pre-tool-use, post-tool-use, subagent-stop`);
     if (runtime === 'claude-code') {
       console.log('  ⚙️  ~/.claude/settings.json — Hooks registered');
+      console.log('  🔓 .claude/settings.json  — Git auto-approval configured');
       console.log('  📋 ~/.claude/commands/tw/ — Slash commands installed');
       console.log('  🤖 ~/.claude/agents/     — Agent prompts installed');
     } else {

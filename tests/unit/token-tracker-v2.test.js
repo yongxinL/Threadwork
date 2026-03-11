@@ -3,9 +3,9 @@
  * Run: node --test tests/unit/token-tracker-v2.test.js
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'fs';
+import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 
 const tmpDir = join(import.meta.dirname ?? process.cwd(), '../../.test-tmp-token-v2');
@@ -62,4 +62,8 @@ describe('formatBudgetDashboard', () => {
     // When no fetches, the spec fetch section should not appear
     assert.ok(!dash.includes('fetches') || dash.includes('0'));
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

@@ -3,7 +3,7 @@
  * Tests buildRemediationBlock integration with spec-engine and skill-tier formatting.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -82,4 +82,8 @@ describe('buildRemediationBlock integration', () => {
     assert.ok('primary_violation' in remediation, 'Should have primary_violation field');
     assert.ok('fix_template' in remediation, 'Should have fix_template field');
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

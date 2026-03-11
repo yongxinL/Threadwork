@@ -3,9 +3,9 @@
  * Run: node --test tests/unit/entropy-collector.test.js
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 
 const tmpDir = join(import.meta.dirname ?? process.cwd(), '../../.test-tmp-entropy');
@@ -136,4 +136,8 @@ describe('listEntropyReports', () => {
     const reports = listEntropyReports(99);
     assert.equal(reports.length, 0);
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

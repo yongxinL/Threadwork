@@ -4,7 +4,7 @@
  * sessions/ directory creation, token-log patching, and budget recalibration.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, cpSync } from 'fs';
 import { join, dirname } from 'path';
@@ -173,4 +173,8 @@ describe('threadwork update --to v0.3.0 migration', () => {
     Object.defineProperty(process, 'cwd', { value: origCwd, configurable: true });
     process.env.HOME = origHome;
   });
+});
+
+after(() => {
+  try { rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* ignore */ }
 });

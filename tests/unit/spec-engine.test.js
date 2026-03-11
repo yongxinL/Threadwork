@@ -3,9 +3,9 @@
  * Run: node --test tests/unit/spec-engine.test.js
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import matter from 'gray-matter';
 
@@ -130,4 +130,8 @@ describe('generateSpecIds', () => {
     );
     assert.ok(content.includes('specId:'));
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

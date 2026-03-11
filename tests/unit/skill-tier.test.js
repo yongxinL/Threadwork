@@ -2,9 +2,9 @@
  * Unit tests for lib/skill-tier.js
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 
 // Set up temp project structure
@@ -107,4 +107,8 @@ describe('formatOutput', () => {
     const content = '## Header\nSome content';
     assert.equal(formatOutput(content, { tier: 'beginner' }), content);
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });

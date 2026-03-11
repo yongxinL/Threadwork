@@ -3,9 +3,9 @@
  * Run: node --test tests/unit/store.test.js
  */
 
-import { test, describe, beforeEach } from 'node:test';
+import { test, describe, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 
 // Use env var override so store.js uses a test-scoped directory
@@ -179,4 +179,10 @@ describe('getStoreInjectionBlock', () => {
     const tokens = Math.ceil(block.length / 4);
     assert.ok(tokens <= 100, `Expected <=100 tokens, got ${tokens} (${block.length} chars)`);
   });
+});
+
+after(() => {
+  const tmpCwd = join(import.meta.dirname ?? process.cwd(), '../../.test-tmp-store-promote');
+  try { rmSync(tmpStore, { recursive: true, force: true }); } catch { /* ignore */ }
+  try { rmSync(tmpCwd, { recursive: true, force: true }); } catch { /* ignore */ }
 });

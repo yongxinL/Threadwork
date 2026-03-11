@@ -98,6 +98,26 @@ export async function installClaudeCode({ cwd, global: isGlobal, __dirname: pkgD
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
   console.log(`  ✓ Hooks merged into ${settingsPath}`);
 
+  // ── Merge git permissions into project-level .claude/settings.json ────────
+  const projectSettingsPath = join(cwd, '.claude', 'settings.json');
+  let projectSettings = {};
+  if (existsSync(projectSettingsPath)) {
+    try {
+      projectSettings = JSON.parse(readFileSync(projectSettingsPath, 'utf8'));
+    } catch { /* will create fresh */ }
+  }
+  const THREADWORK_PERMISSIONS = ['Bash(git:*)', 'Bash(node:*)'];
+  projectSettings.permissions = projectSettings.permissions ?? {};
+  projectSettings.permissions.allow = projectSettings.permissions.allow ?? [];
+  for (const perm of THREADWORK_PERMISSIONS) {
+    if (!projectSettings.permissions.allow.includes(perm)) {
+      projectSettings.permissions.allow.push(perm);
+    }
+  }
+  mkdirSync(join(cwd, '.claude'), { recursive: true });
+  writeFileSync(projectSettingsPath, JSON.stringify(projectSettings, null, 2), 'utf8');
+  console.log(`  ✓ Git permissions added to ${projectSettingsPath}`);
+
   // ── Copy slash commands ────────────────────────────────────────────────────
   // pkgDir is the install/ subdirectory; templates/ is one level up
   const pkgRoot = join(pkgDir ?? process.cwd(), '..');

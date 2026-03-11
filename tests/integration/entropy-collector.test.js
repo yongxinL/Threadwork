@@ -3,7 +3,7 @@
  * Tests isWaveComplete, writeEntropyReport, readEntropyReport, and listEntropyReports.
  */
 
-import { test, describe } from 'node:test';
+import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
@@ -91,4 +91,8 @@ describe('writeEntropyReport / readEntropyReport integration', () => {
     assert.ok(Array.isArray(reports), 'Should return an array');
     assert.ok(reports.length >= 1, `Should have at least 1 report, got ${reports.length}`);
   });
+});
+
+after(() => {
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
 });
