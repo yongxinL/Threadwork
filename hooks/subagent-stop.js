@@ -119,7 +119,7 @@ function buildRemediationPrompt(rejectionPayload, tier) {
 async function main() {
   let payload = {};
   try {
-    const raw = readFileSync('/dev/stdin', 'utf8').trim();
+    const raw = readFileSync(0, 'utf8').trim();
     if (raw) payload = JSON.parse(raw);
   } catch { /* empty stdin */ }
 

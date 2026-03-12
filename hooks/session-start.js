@@ -31,7 +31,7 @@ async function main() {
   // Read hook payload from stdin
   let payload = {};
   try {
-    const raw = readFileSync('/dev/stdin', 'utf8').trim();
+    const raw = readFileSync(0, 'utf8').trim();
     if (raw) payload = JSON.parse(raw);
   } catch {
     // No stdin or malformed — continue with empty payload
