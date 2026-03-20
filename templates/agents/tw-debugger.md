@@ -75,6 +75,27 @@ Change: <description of change>
 <If this is a recurring pattern, suggest a spec update>
 ```
 
+## Discovery Protocol
+
+Bugs often reveal facts about the codebase that future agents need. Capture these using the `knowledge_note` virtual tool.
+
+**Call `knowledge_note` when you discover:**
+- The root cause involved a non-obvious constraint (e.g., "ESM live bindings prevent patching os.homedir — use env var override")
+- A workaround was required that must not be reverted (e.g., "Must use spawnSync not execSync here — execSync drops stderr")
+- An API misbehaves in a specific way (e.g., "gray-matter silently ignores YAML keys with colons in values unless quoted")
+- A test environment constraint (e.g., "Integration tests require THREADWORK_STORE_DIR set or they write to home dir")
+
+**Tool signature:**
+```
+knowledge_note({
+  category: "test_config" | "api_behavior" | "env_constraint" | "workaround" | "pattern",
+  scope: "src/path/to/relevant/**",
+  summary: "One-sentence fact about what you discovered",
+  evidence: "file:line or error text that confirms this",
+  critical: true | false
+})
+```
+
 ## Behavioral Constraints
 - Maximum 5 hypothesis iterations — if unresolved, escalate with a clear summary of what was tried
 - Never delete code to make tests pass — fix the underlying issue
