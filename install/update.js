@@ -30,6 +30,10 @@ export async function runUpdate(options) {
     return runMigrateV030({ cwd, stateDir, isDryRun });
   }
 
+  if (targetVersion === 'v0.3.2') {
+    return runMigrateV032({ cwd, stateDir, isDryRun });
+  }
+
   // ── Standard update (no version target) ─────────────────────────────────────
   console.log('\n── Threadwork Update ─────────────────────────────');
   if (isDryRun) console.log('DRY RUN — no changes will be applied\n');
@@ -475,6 +479,237 @@ async function runMigrateV030({ cwd, stateDir, isDryRun }) {
     console.log('  2. Review ~/.threadwork/pricing.json and update model prices if needed');
     console.log('  3. Review the new model_switch_policy setting in project.json');
     console.log('  4. Restart Claude Code to load updated hooks\n');
+  } else {
+    console.log('\nDRY RUN — no changes applied.');
+  }
+}
+
+// ── v0.3.2 Migration ──────────────────────────────────────────────────────────
+
+/**
+ * Idempotent v0.3.x → v0.3.2 migration.
+ * Safe to run multiple times — checks _version before each step.
+ *
+ * New in v0.3.2:
+ * 1. Create .threadwork/specs/enforcement/ directory
+ * 2. Copy enforcement example spec template (if not already present)
+ * 3. Create .threadwork/specs/frontend/ directory
+ * 4. Copy frontend design-ref example spec template (if not already present)
+ * 5. Create .threadwork/state/knowledge-notes.json (empty)
+ * 6. Create .threadwork/state/gap-report.json (empty)
+ * 7. Create .threadwork/state/spec-staleness-tracker.json (empty)
+ * 8. Create verification-profiles/ dir in lib if missing
+ * 9. Patch project.json with autonomyLevel and verificationType defaults
+ * 10. Copy new lib modules: rule-evaluator.js, doc-freshness.js, knowledge-notes.js,
+ *     design-ref.js, verification-profile.js, autonomy.js
+ * 11. Copy updated hooks: pre-tool-use.js, post-tool-use.js, subagent-stop.js, session-start.js
+ * 12. Copy new agent templates: tw-reviewer.md
+ * 13. Copy new command templates: tw-docs-health, tw-readiness, tw-autonomy, tw-verify-manual
+ * 14. Copy verification profile JSON templates
+ * 15. Stamp _version = '0.3.2'
+ */
+async function runMigrateV032({ cwd, stateDir, isDryRun }) {
+  console.log('\n╔══════════════════════════════════════════════╗');
+  console.log('║   Threadwork — Migrate to v0.3.2             ║');
+  console.log('╚══════════════════════════════════════════════╝\n');
+
+  if (isDryRun) console.log('DRY RUN — no changes will be applied\n');
+
+  const projectPath = join(stateDir, 'project.json');
+  let proj = {};
+  try {
+    proj = JSON.parse(readFileSync(projectPath, 'utf8'));
+  } catch { /* project.json may not exist */ }
+
+  if (proj._version === '0.3.2') {
+    console.log('✅ Already at v0.3.2 — nothing to do.');
+    return;
+  }
+
+  const applied = [];
+  const skipped = [];
+
+  // ── Step 1: Backup existing hooks ─────────────────────────────────────────
+  const hooksDir = join(cwd, '.threadwork', 'hooks');
+  const backupDir = join(cwd, '.threadwork', 'backup', 'v0.3.x-hooks');
+  if (existsSync(hooksDir)) {
+    applied.push('  [1] Backed up hooks/ → .threadwork/backup/v0.3.x-hooks/');
+    if (!isDryRun) {
+      mkdirSync(backupDir, { recursive: true });
+      cpSync(hooksDir, backupDir, { recursive: true });
+    }
+  } else {
+    skipped.push('  [1] Hooks backup skipped (.threadwork/hooks/ not found)');
+  }
+
+  // ── Step 2: Create enforcement specs directory ─────────────────────────────
+  const enforcementDir = join(cwd, '.threadwork', 'specs', 'enforcement');
+  if (!existsSync(enforcementDir)) {
+    applied.push('  [2] Creating .threadwork/specs/enforcement/');
+    if (!isDryRun) mkdirSync(enforcementDir, { recursive: true });
+  } else {
+    skipped.push('  [2] .threadwork/specs/enforcement/ already exists');
+  }
+
+  // ── Step 3: Copy enforcement example spec template ─────────────────────────
+  const enforcementTemplateSrc = join(__dirname, '..', 'templates', 'specs', 'enforcement', 'example-rules.md');
+  const enforcementTemplateDest = join(enforcementDir, 'example-rules.md');
+  if (existsSync(enforcementTemplateSrc) && !existsSync(enforcementTemplateDest)) {
+    applied.push('  [3] Copying enforcement example spec template');
+    if (!isDryRun) cpSync(enforcementTemplateSrc, enforcementTemplateDest);
+  } else {
+    skipped.push('  [3] Enforcement example spec already present or source missing');
+  }
+
+  // ── Step 4: Create frontend specs directory ────────────────────────────────
+  const frontendDir = join(cwd, '.threadwork', 'specs', 'frontend');
+  if (!existsSync(frontendDir)) {
+    applied.push('  [4] Creating .threadwork/specs/frontend/');
+    if (!isDryRun) mkdirSync(frontendDir, { recursive: true });
+  } else {
+    skipped.push('  [4] .threadwork/specs/frontend/ already exists');
+  }
+
+  // ── Step 5: Copy design-ref example spec template ─────────────────────────
+  const designRefTemplateSrc = join(__dirname, '..', 'templates', 'specs', 'frontend', 'design-ref-example.md');
+  const designRefTemplateDest = join(frontendDir, 'design-ref-example.md');
+  if (existsSync(designRefTemplateSrc) && !existsSync(designRefTemplateDest)) {
+    applied.push('  [5] Copying design-ref example spec template');
+    if (!isDryRun) cpSync(designRefTemplateSrc, designRefTemplateDest);
+  } else {
+    skipped.push('  [5] Design-ref example spec already present or source missing');
+  }
+
+  // ── Step 6: Create knowledge-notes.json ───────────────────────────────────
+  const knowledgeNotesPath = join(stateDir, 'knowledge-notes.json');
+  if (!existsSync(knowledgeNotesPath)) {
+    applied.push('  [6] Creating .threadwork/state/knowledge-notes.json');
+    if (!isDryRun) {
+      writeFileSync(knowledgeNotesPath, JSON.stringify({ notes: [] }, null, 2), 'utf8');
+    }
+  } else {
+    skipped.push('  [6] knowledge-notes.json already exists');
+  }
+
+  // ── Step 7: Create gap-report.json ────────────────────────────────────────
+  const gapReportPath = join(stateDir, 'gap-report.json');
+  if (!existsSync(gapReportPath)) {
+    applied.push('  [7] Creating .threadwork/state/gap-report.json');
+    if (!isDryRun) {
+      writeFileSync(gapReportPath, JSON.stringify({ gaps: [] }, null, 2), 'utf8');
+    }
+  } else {
+    skipped.push('  [7] gap-report.json already exists');
+  }
+
+  // ── Step 8: Create spec-staleness-tracker.json ────────────────────────────
+  const staleTrackerPath = join(stateDir, 'spec-staleness-tracker.json');
+  if (!existsSync(staleTrackerPath)) {
+    applied.push('  [8] Creating .threadwork/state/spec-staleness-tracker.json');
+    if (!isDryRun) {
+      writeFileSync(staleTrackerPath, JSON.stringify({}, null, 2), 'utf8');
+    }
+  } else {
+    skipped.push('  [8] spec-staleness-tracker.json already exists');
+  }
+
+  // ── Step 9: Update hooks ──────────────────────────────────────────────────
+  const hooksSourceDir = join(__dirname, '..', 'hooks');
+  if (existsSync(hooksSourceDir)) {
+    for (const file of ['pre-tool-use.js', 'post-tool-use.js', 'subagent-stop.js', 'session-start.js']) {
+      const src = join(hooksSourceDir, file);
+      const dest = join(hooksDir, file);
+      if (existsSync(src)) {
+        applied.push(`  [9] Updating hooks/${file}`);
+        if (!isDryRun) cpSync(src, dest);
+      }
+    }
+  }
+
+  // ── Step 10: Update lib modules ───────────────────────────────────────────
+  const libSourceDir = join(__dirname, '..', 'lib');
+  const libDestDir = join(cwd, '.threadwork', 'lib');
+  if (existsSync(libSourceDir)) {
+    if (!isDryRun) cpSync(libSourceDir, libDestDir, { recursive: true });
+    applied.push('  [10] Updated lib/ (all modules including new v0.3.2 modules)');
+  }
+
+  // ── Step 11: Copy new agent template: tw-reviewer.md ─────────────────────
+  const { getCommandsDir, detectRuntime } = await import('../lib/runtime.js');
+  const runtime = detectRuntime();
+  const commandsDest = getCommandsDir(runtime);
+  const agentTemplatesSrc = join(__dirname, '..', 'templates', 'agents');
+  const reviewerSrc = join(agentTemplatesSrc, 'tw-reviewer.md');
+  if (existsSync(reviewerSrc)) {
+    applied.push('  [11] Installing tw-reviewer agent template');
+    if (!isDryRun) cpSync(reviewerSrc, join(commandsDest, 'tw-reviewer.md'));
+  } else {
+    skipped.push('  [11] tw-reviewer.md template source not found');
+  }
+
+  // ── Step 12: Update all command templates ─────────────────────────────────
+  const commandsSrcDir = join(__dirname, '..', 'templates', 'commands');
+  if (existsSync(commandsSrcDir)) {
+    for (const file of readdirSync(commandsSrcDir)) {
+      if (file.endsWith('.md')) {
+        const destFile = file.replace(/^tw-/, '');
+        const stalePath = join(commandsDest, file);
+        if (file !== destFile && existsSync(stalePath)) {
+          if (!isDryRun) {
+            const { rmSync } = await import('fs');
+            rmSync(stalePath);
+          }
+        }
+        applied.push(`  [12] Updating command template: ${destFile}`);
+        if (!isDryRun) cpSync(join(commandsSrcDir, file), join(commandsDest, destFile));
+      }
+    }
+  }
+
+  // ── Step 13: Copy verification profile templates ──────────────────────────
+  const profilesSrcDir = join(__dirname, '..', 'templates', 'verification-profiles');
+  const profilesDestDir = join(cwd, '.threadwork', 'verification-profiles');
+  if (existsSync(profilesSrcDir)) {
+    if (!isDryRun) {
+      mkdirSync(profilesDestDir, { recursive: true });
+      cpSync(profilesSrcDir, profilesDestDir, { recursive: true });
+    }
+    applied.push('  [13] Copied verification profile templates to .threadwork/verification-profiles/');
+  } else {
+    skipped.push('  [13] Verification profiles source not found');
+  }
+
+  // ── Step 14: Patch project.json with v0.3.2 fields ───────────────────────
+  applied.push('  [14] Patching project.json with v0.3.2 fields');
+  if (!isDryRun) {
+    try {
+      const currentProj = JSON.parse(readFileSync(projectPath, 'utf8'));
+      if (!currentProj.autonomyLevel) currentProj.autonomyLevel = 'supervised';
+      if (!currentProj.verificationType) currentProj.verificationType = null;
+      currentProj._version = '0.3.2';
+      currentProj._updated = new Date().toISOString();
+      writeFileSync(projectPath, JSON.stringify(currentProj, null, 2), 'utf8');
+    } catch (e) {
+      skipped.push(`  [14] Could not patch project.json: ${e.message}`);
+    }
+  }
+
+  // ── Print summary ─────────────────────────────────────────────────────────
+  console.log('Applied:');
+  for (const line of applied) console.log(line);
+  if (skipped.length > 0) {
+    console.log('\nSkipped (already current or not applicable):');
+    for (const line of skipped) console.log(line);
+  }
+
+  if (!isDryRun) {
+    console.log('\n✅ Migration to v0.3.2 complete!\n');
+    console.log('Next steps:');
+    console.log('  1. Restart Claude Code to load updated hooks');
+    console.log('  2. Run /tw:docs-health to check your spec library health');
+    console.log('  3. Run /tw:readiness to see the autonomy readiness score');
+    console.log('  4. Add enforcement rules to .threadwork/specs/enforcement/ if desired');
+    console.log('  5. Run /tw:discuss-phase N to set autonomyLevel and verificationType for your phase\n');
   } else {
     console.log('\nDRY RUN — no changes applied.');
   }
