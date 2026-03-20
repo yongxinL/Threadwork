@@ -1,0 +1,34 @@
+{
+  "type": "browser-extension",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["dist/"]
+  },
+  "automated": [
+    {
+      "type": "file_exists",
+      "description": "Extension manifest exists",
+      "files": ["dist/manifest.json"],
+      "blocking": true
+    },
+    {
+      "type": "json_schema",
+      "description": "manifest.json has required fields",
+      "file": "dist/manifest.json",
+      "required_keys": ["manifest_version", "name", "version"],
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Load unpacked extension in Chrome/Firefox developer mode",
+      "expected": "Extension loads without errors",
+      "critical": true
+    },
+    {
+      "description": "Test extension on target website",
+      "expected": "Core functionality works as specified",
+      "critical": true
+    }
+  ]
+}

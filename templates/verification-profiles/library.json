@@ -1,0 +1,43 @@
+{
+  "type": "library",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["dist/", "lib/"]
+  },
+  "automated": [
+    {
+      "type": "command_runs",
+      "description": "Build succeeds",
+      "command": "npm run build",
+      "timeout": 60000,
+      "blocking": true
+    },
+    {
+      "type": "file_exists",
+      "description": "Package entry points exist",
+      "files": ["package.json"],
+      "blocking": true
+    },
+    {
+      "type": "json_schema",
+      "description": "package.json has required fields",
+      "file": "package.json",
+      "required_keys": ["name", "version", "main"],
+      "blocking": true
+    },
+    {
+      "type": "export_exists",
+      "description": "Main module exports expected API",
+      "file": "src/index.js",
+      "exports": ["default"],
+      "blocking": false
+    }
+  ],
+  "manual": [
+    {
+      "description": "Install in a fresh project and import the main export",
+      "expected": "No errors, expected API surface available",
+      "critical": true
+    }
+  ]
+}

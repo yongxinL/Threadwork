@@ -1,0 +1,41 @@
+{
+  "type": "cli-tool",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["dist/", "bin/"]
+  },
+  "automated": [
+    {
+      "type": "command_runs",
+      "description": "CLI help runs without error",
+      "command": "node bin/index.js --help",
+      "timeout": 10000,
+      "blocking": true
+    },
+    {
+      "type": "command_runs",
+      "description": "CLI version runs without error",
+      "command": "node bin/index.js --version",
+      "timeout": 5000,
+      "blocking": true
+    },
+    {
+      "type": "file_exists",
+      "description": "Main entry point exists",
+      "files": ["bin/index.js"],
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Core command runs with sample input",
+      "expected": "Produces expected output, exits 0",
+      "critical": true
+    },
+    {
+      "description": "Error cases produce helpful error messages",
+      "expected": "Clear error message with exit code 1",
+      "critical": false
+    }
+  ]
+}

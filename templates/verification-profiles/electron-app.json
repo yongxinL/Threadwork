@@ -1,0 +1,28 @@
+{
+  "type": "electron-app",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["dist/"]
+  },
+  "automated": [
+    {
+      "type": "command_runs",
+      "description": "Build produces distributable",
+      "command": "npm run build",
+      "timeout": 120000,
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Run npm start and verify app launches",
+      "expected": "App window opens, no crash in first 10 seconds",
+      "critical": true
+    },
+    {
+      "description": "Core user workflow completes end-to-end",
+      "expected": "Primary use case works as defined in phase requirements",
+      "critical": true
+    }
+  ]
+}
