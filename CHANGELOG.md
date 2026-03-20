@@ -7,6 +7,95 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.2] — 2026-03-20
+
+**Nine upgrades across three tiers — Spec Enforcement, Knowledge, Design, Verification, and Autonomous Operation:**
+
+### Added
+
+**Tier 1 — Core Enforcement Loop**
+
+**Upgrade 1: Spec Rules Engine + Compliance Gate**
+- `lib/rule-evaluator.js`: New module — `evaluateGrepMustExist`, `evaluateGrepMustNotExist`, `evaluateImportBoundary`, `evaluateNamingPattern`, `evaluateFileStructure`, `evaluateRules` — 5 machine-checkable rule types enforced against the working tree; `globToRegex()` helper for correct glob→regex conversion (single-pass, avoids `**→.*` then dot-escape conflict)
+- `lib/spec-engine.js`: `loadRulesFromSpecs(specsDir)` — reads all spec frontmatter `rules` arrays; `wasSpecFetchedThisSession(specId)`, `trackSpecStaleness(specId, changedFiles)` — spec staleness tracking
+- `lib/quality-gate.js`: New `spec-compliance` gate calls `loadRulesFromSpecs` + `evaluateRules`; results surfaced in Ralph Loop rejection payloads
+- Specs gain optional `rules` frontmatter array. Five rule types:
+  - `grep_must_exist` — pattern must appear in files matching glob
+  - `grep_must_not_exist` — pattern must NOT appear (e.g. no `console.log` in `src/**`)
+  - `import_boundary` — files in `from` glob cannot import from `cannot_import` globs
+  - `naming_pattern` — exported names in matching files must match regex
+  - `file_structure` — required file glob patterns must exist on disk
+
+**Upgrade 2: Failure Classification + Fast-Track Proposals**
+- `lib/quality-gate.js`: `classifyFailure(gateResults, specEngine)` — returns structured `{ type, confidence, evidence, recommendation }` where type is one of `code_bug`, `missing_capability`, `knowledge_gap`, `architectural_violation`, `test_failure`
+- `hooks/subagent-stop.js`: Classification-aware retry — different retry strategies per failure type; `tw-reviewer` spawn on architectural violations; autonomy-mode retries
+
+**Upgrade 3: tw-reviewer Agent (Agent-to-Agent Review)**
+- `templates/agents/tw-reviewer.md`: New agent — Sonnet; performs structured peer review of executor output; checks spec compliance, naming, import boundaries, test coverage, and architectural decisions; outputs structured `REVIEW:` block with PASS/FAIL per criterion
+
+**Tier 2 — Knowledge, Verification, Design Layer**
+
+**Upgrade 4: Doc-Freshness Gate + Knowledge Notes**
+- `lib/doc-freshness.js`: New module — `extractFileReferences(docContent)`, `checkDocFreshness(docPath, projectRoot)` — detects stale documentation by finding file references and checking if referenced files have been modified more recently than the doc
+- `lib/knowledge-notes.js`: New module — `addNote`, `readNotes`, `getNotesForScope`, `getCriticalNotes`, `incrementSessionsSurvived`, `promoteEligibleNotes`, `buildKnowledgeNotesBlock` — lifecycle for session-to-session knowledge retention; notes are scoped by file glob and categorized (`setup`, `api`, `edge_case`, `testing`, `workflow`); notes with `sessionsSurvived >= 2` are promoted to the spec library
+- `lib/quality-gate.js`: New `doc-freshness` gate
+- `templates/agents/tw-entropy-collector.md`: Added 7th category — Spec Staleness; checks files modified in wave against `spec-staleness-tracker.json`
+- `templates/commands/tw-docs-health.md`: New `/tw:docs-health` command
+
+**Upgrade 5: Enhanced Discuss-Phase (10+2 Questions)**
+- `templates/commands/tw-discuss-phase.md`: Extended from 5 to 12 questions (Q6–Q12 added): architectural rules, required patterns, naming conventions, design files + fidelity, verification profile type, autonomy preference, known gaps/unknowns; Step 4 auto-generates `.threadwork/specs/enforcement/phase-N-rules.md` from rule questions and writes `verificationType`/`autonomyLevel` to `project.json`
+
+**Upgrade 6: Runtime Verification (Smoke Test + Profiles)**
+- `lib/verification-profile.js`: New module — `loadProfile(projectJson)`, `runProfileChecks(profile, projectRoot)` — runtime verification via structured profiles stored in `project.json.verification`; supports `file_exists`, `json_schema`, `no_forbidden_patterns` automated check types; profiles for `browser-extension`, `web-app`, `cli-tool`, `library`, `custom`
+- `lib/quality-gate.js`: New `smoke-test` gate; calls `runProfileChecks` and surfaces results in Ralph Loop
+- `templates/commands/tw-verify-manual.md`: New `/tw:verify-manual` command
+
+**Upgrade 9: Design Reference System**
+- `lib/design-ref.js`: New module — `loadDesignRefs(specsDir, projectRoot)`, `resolveDesignRefsForFiles(refs, taskFiles)`, `validateDesignRefs(refs, projectRoot)`, `buildDesignInjectionBlock(refs, projectRoot)` — design files (HTML wireframes, PNGs, SVGs) referenced in spec frontmatter as `design_refs`; injected into executor and verifier prompts; fidelity levels: `exact`, `structural`, `reference`
+- `lib/spec-engine.js`: Design refs surfaced in routing map entries
+- `templates/agents/tw-verifier.md`: Added design fidelity check — reads design files and compares at declared fidelity level; reports in verification table with `DESIGN:` prefix
+
+**Tier 3 — Proactive Detection + Autonomy**
+
+**Upgrade 7: Capability Gap Detection + Readiness Audit**
+- `lib/spec-engine.js`: `scanPlanForGaps(planXml, specIndex)` — detects tasks referencing tools/APIs/services not covered by any spec; `auditHarnessReadiness(projectRoot)` — 7-point readiness check (spec coverage, gap report, knowledge notes, doc freshness, enforcement specs, verification profile, autonomy config)
+- `lib/state.js`: `appendGapReport(gaps)`, `readGapReport()`, `aggregateGaps()` — persisted gap tracking across sessions
+- `templates/commands/tw-readiness.md`: New `/tw:readiness` command
+
+**Upgrade 8: Autonomous Operation Mode**
+- `lib/autonomy.js`: New module — `getAutonomyLevel()`, `setAutonomyLevel(level)`, `shouldAutoApprovePlan(level, gateResults)`, `isSafetyRail(action)`, `buildAutonomyBlock()` — three levels (`supervised`, `guided`, `autonomous`); safety rails block destructive/security/force actions regardless of level; autonomous mode auto-approves plans with no blocking issues
+- `hooks/session-start.js`: Injects autonomy block; autonomous mode shows auto-resume notice
+- `hooks/post-tool-use.js`: Autonomy auto-handoff in autonomous mode
+- `templates/commands/tw-autonomy.md`: New `/tw:autonomy` command
+
+### Changed
+
+- `templates/agents/tw-executor.md`: Added `## Discovery Protocol` section — agents call `knowledge_note({category, scope, summary, evidence, critical})` inline during implementation when discovering non-obvious facts
+- `templates/agents/tw-debugger.md`: Added `## Discovery Protocol` section — same knowledge_note tool; emphasizes root causes, workarounds, and API misbehaviors
+- `lib/handoff.js`: Section 4b (gap report summary) and Section 4c (knowledge notes) added to handoff generation
+- `hooks/pre-tool-use.js`: `knowledge_note` virtual tool interception; design ref block injection for executor/verifier; binding constraints injection
+- `hooks/post-tool-use.js`: Spec staleness tracking after writes; knowledge note freshness check; autonomy auto-handoff
+
+### Migration Command
+
+```bash
+threadwork update --to v0.3.2
+```
+
+**14 idempotent steps:** backs up hooks → creates enforcement and frontend spec directories → initializes state files (`knowledge-notes.json`, `gap-report.json`, `spec-staleness-tracker.json`) → updates hooks and lib modules → installs tw-reviewer agent → updates all command templates → copies verification profile templates → patches `project.json` with `autonomyLevel: 'supervised'`, `verificationType: null`, `_version: '0.3.2'`
+
+---
+
+## [0.3.1] — 2026-03-15
+
+**Patch release — bug fixes only:**
+
+- `hooks/subagent-stop.js`: Use `fd 0` instead of `/dev/stdin` for Node v24 compatibility
+- `lib/quality-gate.js`: Correct default pricing for Haiku ($0.80/$4.00/M) and Opus ($15/$75/M) models
+- `tests/unit/`: Add `after()` cleanup to all test files missing it
+
+---
+
 ## [0.3.0] — 2026-03-05
 
 **Five operational gap fixes for real-world v0.2.x deployments:**
