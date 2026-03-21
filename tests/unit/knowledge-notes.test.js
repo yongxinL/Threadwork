@@ -131,7 +131,7 @@ describe('incrementSessionsSurvived', () => {
 describe('promoteEligibleNotes', () => {
   beforeEach(clearNotes);
 
-  test('promotes notes with sessionsSurvived >= 2 and returns count', async () => {
+  test('promotes notes with sessionsSurvived >= 2 and returns promoted array', async () => {
     addNote({ category: 'workflow', scope: 'src/**', summary: 'Mature note', evidence: 'x.js:1', critical: false });
     // Manually set sessionsSurvived to 2
     const notes = readNotes();
@@ -139,14 +139,13 @@ describe('promoteEligibleNotes', () => {
     writeFileSync(notesFilePath(), JSON.stringify({ notes }, null, 2), 'utf8');
 
     const promoted = await promoteEligibleNotes();
-    // Returns a number — 1 promoted
-    assert.ok(promoted >= 1);
+    assert.ok(promoted.length >= 1);
   });
 
   test('does not promote notes with low sessionsSurvived', async () => {
     addNote({ category: 'workflow', scope: 'src/**', summary: 'Young note', evidence: 'x.js:1', critical: false });
     const promoted = await promoteEligibleNotes();
-    assert.equal(promoted, 0);
+    assert.equal(promoted.length, 0);
   });
 });
 

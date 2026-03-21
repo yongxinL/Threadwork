@@ -11,6 +11,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 let tmpDir;
+let origCwd;
 let addNote, readNotes, getNotesForScope, buildKnowledgeNotesBlock,
     incrementSessionsSurvived, promoteEligibleNotes;
 
@@ -19,7 +20,7 @@ before(async () => {
   mkdirSync(join(tmpDir, '.threadwork', 'state'), { recursive: true });
   mkdirSync(join(tmpDir, '.threadwork', 'specs', 'proposals'), { recursive: true });
 
-  const origCwd = process.cwd;
+  origCwd = process.cwd;
   Object.defineProperty(process, 'cwd', { value: () => tmpDir, configurable: true });
 
   const mod = await import('../../lib/knowledge-notes.js');
@@ -29,11 +30,11 @@ before(async () => {
   buildKnowledgeNotesBlock = mod.buildKnowledgeNotesBlock;
   incrementSessionsSurvived = mod.incrementSessionsSurvived;
   promoteEligibleNotes = mod.promoteEligibleNotes;
-
-  Object.defineProperty(process, 'cwd', { value: origCwd, configurable: true });
+  // Keep cwd patched to tmpDir for all tests — restored in after()
 });
 
 after(() => {
+  if (origCwd) Object.defineProperty(process, 'cwd', { value: origCwd, configurable: true });
   if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -128,6 +129,6 @@ describe('knowledge capture full lifecycle', () => {
 
     const notes = await readNotes();
     assert.equal(notes.length, 5);
-    assert.ok(notes.every(n => typeof n.id === 'string'));
+    assert.ok(notes.every(n => typeof n.noteId === 'string'));
   });
 });

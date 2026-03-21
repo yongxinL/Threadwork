@@ -41,7 +41,7 @@ node_modules/
 .threadwork/workspace/
 .threadwork/worktrees/
 .threadwork/state/
-
+.threadwork/specs/proposals/
 # Test temp dirs
 .test-tmp-*/
 

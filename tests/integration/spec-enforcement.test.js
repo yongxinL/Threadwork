@@ -30,7 +30,7 @@ before(async () => {
     'domain: enforcement',
     'rules:',
     '  - type: grep_must_not_exist',
-    '    pattern: "console\\.log"',
+    "    pattern: 'console\\.log'",
     '    files: "src/**/*.ts"',
     '    message: "No console.log in src/ (SPEC:enf-001)"',
     '  - type: naming_pattern',
