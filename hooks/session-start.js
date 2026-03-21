@@ -31,7 +31,7 @@ async function main() {
   // Read hook payload from stdin
   let payload = {};
   try {
-    const raw = readFileSync('/dev/stdin', 'utf8').trim();
+    const raw = readFileSync(0, 'utf8').trim();
     if (raw) payload = JSON.parse(raw);
   } catch {
     // No stdin or malformed — continue with empty payload
@@ -160,6 +160,47 @@ async function main() {
     } else {
       logHook('INFO', 'session-start: Store section skipped — budget above 80%');
     }
+
+    // v0.3.2: Increment sessionsSurvived on all knowledge notes
+    try {
+      const { incrementSessionsSurvived, getCriticalNotes, buildKnowledgeNotesBlock } =
+        await import('../lib/knowledge-notes.js');
+      incrementSessionsSurvived();
+
+      const criticalNotes = getCriticalNotes();
+      if (criticalNotes.length > 0) {
+        const notesBlock = buildKnowledgeNotesBlock('');
+        if (notesBlock) {
+          parts.push(`### Critical Implementation Notes`, notesBlock, '');
+          logHook('INFO', `session-start: injected ${criticalNotes.length} critical knowledge notes`);
+        }
+      }
+    } catch { /* knowledge-notes module not available */ }
+
+    // v0.3.2: Inject recurring gap warnings (high-priority)
+    try {
+      const { aggregateGaps } = await import('../lib/state.js');
+      const gaps = aggregateGaps();
+      if (gaps.high.length > 0) {
+        parts.push(`### ⚠️ Recurring Capability Gaps`);
+        for (const gap of gaps.high.slice(0, 3)) {
+          parts.push(`- **${gap.type}** (seen ${gap.count}x): ${gap.description}`);
+        }
+        parts.push('', 'These gaps have caused failures in previous sessions. Plan accordingly.', '');
+        logHook('INFO', `session-start: injected ${gaps.high.length} high-priority gap warnings`);
+      }
+    } catch { /* gaps module not available */ }
+
+    // v0.3.2: Autonomy mode summary
+    try {
+      const { getAutonomyLevel, getAutonomySummary } = await import('../lib/autonomy.js');
+      const level = getAutonomyLevel();
+      if (level !== 'supervised') {
+        const summary = getAutonomySummary();
+        parts.push(`### Autonomy Mode`, summary, '');
+        logHook('INFO', `session-start: autonomy level=${level}`);
+      }
+    } catch { /* autonomy module not available */ }
 
     parts.push(tierInstructions);
 

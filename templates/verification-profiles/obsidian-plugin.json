@@ -1,0 +1,41 @@
+{
+  "type": "obsidian-plugin",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["main.js", "manifest.json"]
+  },
+  "automated": [
+    {
+      "type": "file_exists",
+      "description": "Required plugin files exist",
+      "files": ["main.js", "manifest.json"],
+      "blocking": true
+    },
+    {
+      "type": "json_schema",
+      "description": "manifest.json has required fields",
+      "file": "manifest.json",
+      "required_keys": ["id", "name", "version", "minAppVersion"],
+      "blocking": true
+    },
+    {
+      "type": "grep_must_not_exist",
+      "description": "No eval() calls in main.js",
+      "pattern": "\\beval\\(",
+      "files": "main.js",
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Copy main.js and manifest.json to test vault .obsidian/plugins/plugin-name/",
+      "expected": "Plugin appears in Community Plugins list",
+      "critical": true
+    },
+    {
+      "description": "Enable plugin and verify core functionality",
+      "expected": "Commands appear in command palette, ribbon icon works",
+      "critical": true
+    }
+  ]
+}

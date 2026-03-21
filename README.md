@@ -6,6 +6,28 @@ Threadwork weaves tasks, specs, and sessions into a single thread — a structur
 
 ---
 
+## What's New in v0.3.2
+
+Nine upgrades across three tiers — spec enforcement, knowledge retention, design fidelity, runtime verification, and autonomous operation:
+
+**Tier 1 — Core Enforcement Loop**
+- **Spec Rules Engine** — specs gain a `rules:` frontmatter array with 5 machine-checkable rule types (`grep_must_exist`, `grep_must_not_exist`, `import_boundary`, `naming_pattern`, `file_structure`). A new `spec-compliance` Ralph Loop gate enforces them on every commit. See `lib/rule-evaluator.js`.
+- **Failure Classification** — `classifyFailure()` in `lib/quality-gate.js` returns structured `{ type, confidence, evidence, recommendation }` for each gate failure, enabling smarter retry strategies and fast-track spec proposals.
+- **`tw-reviewer` Agent** — peer review agent (Sonnet) performs structured code review after executor tasks: spec compliance, naming, import boundaries, test coverage, and architectural decisions.
+
+**Tier 2 — Knowledge, Verification, Design**
+- **Knowledge Notes** — agents capture non-obvious implementation facts via `knowledge_note()` during implementation. Notes persist across sessions in `.threadwork/state/knowledge-notes.json`, are injected into future session prompts, and are promoted to the spec library after 2 sessions. See `lib/knowledge-notes.js`.
+- **Doc-Freshness Gate** — detects stale documentation by comparing file references in docs against modified timestamps. New `doc-freshness` Ralph Loop gate. See `lib/doc-freshness.js`.
+- **Enhanced Discuss-Phase** — `/tw:discuss-phase` now asks 12 questions (up from 5), including architectural rules, design files, verification profile, and autonomy preference. Answers auto-generate enforcement specs.
+- **Runtime Verification** — `verification` object in `project.json` defines automated smoke tests (`file_exists`, `json_schema`, `no_forbidden_patterns`). New `smoke-test` Ralph Loop gate. See `lib/verification-profile.js`.
+- **Design Reference System** — design files (HTML wireframes, PNGs, SVGs) referenced in spec frontmatter are injected into executor and verifier prompts. Fidelity levels: `exact`, `structural`, `reference`. See `lib/design-ref.js`.
+
+**Tier 3 — Proactive Detection + Autonomy**
+- **Capability Gap Detection** — `scanPlanForGaps()` detects tasks referencing tools/APIs not covered by any spec. `/tw:readiness` runs a 7-point harness readiness audit.
+- **Autonomous Operation Mode** — three levels (`supervised`, `guided`, `autonomous`) control how much manual confirmation is needed. Safety rails always active. See `lib/autonomy.js` and `/tw:autonomy`.
+
+**Upgrading from v0.3.x?** Run `threadwork update --to v0.3.2` — non-destructive, idempotent, 14 steps. See [docs/upgrade.md](docs/upgrade.md).
+
 ## What's New in v0.3.0
 
 Five operational gap fixes for real-world v0.2.x deployments:
@@ -463,6 +485,9 @@ threadwork update --to v0.2.0
 
 # Then upgrade to v0.3.0
 threadwork update --to v0.3.0
+
+# Then upgrade to v0.3.2
+threadwork update --to v0.3.2
 ```
 
 Both commands are idempotent — safe to run multiple times. User specs, journals, handoffs, and plan files are **never modified**. See [docs/upgrade.md](docs/upgrade.md) for the full migration guide including step-by-step details and troubleshooting.

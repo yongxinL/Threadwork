@@ -26,7 +26,7 @@ diff content. Do not call Read or Glob on files outside the wave diff.
 
 ## Scan Categories
 
-Examine the wave diff for all six categories:
+Examine the wave diff for all seven categories:
 
 ### 1. Naming Drift
 Functions, variables, and files introduced in this wave that diverge from naming conventions
@@ -68,6 +68,18 @@ identifiable from the wave context (>80% structural similarity heuristic).
 
 - Minor: utility function that likely already exists
 - Warning: entire service method duplicated
+
+### 7. Spec Staleness
+Files modified in this wave that are referenced by spec files in `.threadwork/specs/`. If a
+modified file is the sole implementation target of a spec rule, flag whether the implementation
+still satisfies the rule.
+
+- Minor: implementation changed but spec rule still satisfied (note the change for human review)
+- Warning: implementation change appears to violate a `grep_must_exist` or `naming_pattern` rule
+- Error: implementation change violates a `grep_must_not_exist` or `import_boundary` rule
+
+To check: read `.threadwork/state/spec-staleness-tracker.json` if it exists. Each entry maps
+a file path to spec IDs that reference it. Only flag issues for files in the current wave diff.
 
 ## Severity Classification
 

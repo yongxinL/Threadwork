@@ -231,6 +231,30 @@ Also call `TaskUpdate` on your team task to reflect progress (e.g. update the de
 ### No TEAM marker present:
 Operate in **legacy mode** — write SUMMARY.md only, no SendMessage calls.
 
+## Discovery Protocol
+
+While implementing, you will encounter non-obvious facts about how the codebase works. Capture these using the `knowledge_note` virtual tool so future agents benefit from your discoveries.
+
+**Call `knowledge_note` when you discover:**
+- A test configuration requirement (e.g., "Tests must run with --runInBand due to shared state")
+- An API that behaves unexpectedly (e.g., "This endpoint returns null on 404 instead of throwing")
+- A workaround that must be preserved (e.g., "Must use Object.defineProperty to patch process.cwd in tests — ESM live bindings block normal mocking")
+- An environmental constraint (e.g., "Build fails if PORT is not set")
+- A pattern that differs from what the spec implies
+
+**Tool signature:**
+```
+knowledge_note({
+  category: "test_config" | "api_behavior" | "env_constraint" | "workaround" | "pattern",
+  scope: "src/path/to/relevant/**",   // glob matching affected files
+  summary: "One-sentence fact",
+  evidence: "Where you found it (file:line or error message)",
+  critical: true | false              // true = always inject, false = inject when scope matches
+})
+```
+
+Call this tool inline as you work — do not batch all notes at the end.
+
 ## Behavioral Constraints
 
 - If a task's done-condition cannot be met with the specified files: STOP. Write a note in SUMMARY.md and proceed to the next task.

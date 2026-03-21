@@ -1,0 +1,39 @@
+{
+  "type": "web-app",
+  "build": {
+    "command": "npm run build",
+    "outputs": ["dist/", ".next/", "out/"]
+  },
+  "automated": [
+    {
+      "type": "file_exists",
+      "description": "Build output exists",
+      "files": ["dist/index.html"],
+      "blocking": true
+    },
+    {
+      "type": "command_runs",
+      "description": "Dev server starts cleanly",
+      "command": "npm run build 2>&1 | tail -5",
+      "timeout": 60000,
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Home page loads without errors",
+      "expected": "Page renders, no console errors, no 404s",
+      "critical": true
+    },
+    {
+      "description": "Authentication flow works end-to-end",
+      "expected": "Can sign in, see protected content, sign out",
+      "critical": true
+    },
+    {
+      "description": "Mobile layout renders correctly at 375px",
+      "expected": "No horizontal scroll, readable text, tappable buttons",
+      "critical": false
+    }
+  ]
+}
