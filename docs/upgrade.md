@@ -4,6 +4,117 @@
 
 ---
 
+## Upgrading from v0.3.x → v0.3.2
+
+### Prerequisites
+
+- Threadwork v0.3.0 or v0.3.1 already initialized (`.threadwork/` exists)
+- Node.js ≥ 18
+- `threadwork` CLI available
+
+### Migration Command
+
+```bash
+threadwork update --to v0.3.2
+```
+
+The command is **idempotent** — re-running it skips already-completed steps.
+
+**What it does (14 steps):**
+
+1. Backs up current hooks to `.threadwork/backup/v0.3.x-hooks/`
+2. Creates `.threadwork/specs/enforcement/` directory
+3. Copies enforcement example spec template (with rule types documented)
+4. Creates `.threadwork/specs/frontend/` directory
+5. Copies design-ref example spec template
+6. Creates `.threadwork/state/knowledge-notes.json` (empty, if absent)
+7. Creates `.threadwork/state/gap-report.json` (empty, if absent)
+8. Creates `.threadwork/state/spec-staleness-tracker.json` (empty, if absent)
+9. Updates hooks: `pre-tool-use.js`, `post-tool-use.js`, `subagent-stop.js`, `session-start.js`
+10. Updates lib modules: `quality-gate.js`, `spec-engine.js`, `state.js`, `handoff.js` + installs 6 new modules (`rule-evaluator.js`, `doc-freshness.js`, `knowledge-notes.js`, `design-ref.js`, `verification-profile.js`, `autonomy.js`)
+11. Installs `tw-reviewer.md` agent template
+12. Updates all command templates (adds `tw-docs-health.md`, `tw-verify-manual.md`, `tw-readiness.md`, `tw-autonomy.md`)
+13. Copies verification profile JSON templates to `.threadwork/verification-profiles/`
+14. Patches `project.json` with `autonomyLevel: 'supervised'`, `verificationType: null`, `_version: '0.3.2'`
+
+### Post-Upgrade Steps
+
+1. **Run `/tw:readiness`** to see your harness readiness score across 7 dimensions. This gives you a quick view of what v0.3.2 features are configured and what still needs setup.
+
+2. **Add rules to your specs** — edit any spec file and add a `rules:` array to the frontmatter. The enforcement spec at `.threadwork/specs/enforcement/` has commented examples of all 5 rule types. The `spec-compliance` Ralph Loop gate will now check these on every commit.
+
+3. **Run `/tw:discuss-phase`** for your next phase — it now asks 12 questions including architectural rules, naming conventions, design files, and verification profile type. Answers are auto-converted into enforcement specs.
+
+4. **Choose an autonomy level** with `/tw:autonomy set <level>` if you want less manual confirmation. Default is `supervised` (no change from prior behavior).
+
+5. **Add a verification profile** to `project.json` if you want the `smoke-test` Ralph Loop gate. See `.threadwork/verification-profiles/` for templates.
+
+---
+
+### What Each Upgrade Changes for Your Workflow
+
+#### Upgrade 1: Spec Rules Engine
+
+**Before**: Specs were documentation only — agents were instructed to follow them but there was no enforcement at the code level.
+
+**After**: Specs can now include a `rules:` frontmatter array. Each rule is checked by the `spec-compliance` gate in the Ralph Loop after every agent task. Violations block completion with a structured message showing the specId, rule type, and evidence.
+
+Example spec frontmatter:
+```yaml
+---
+specId: SPEC:arch-001
+name: Architecture Boundaries
+rules:
+  - type: grep_must_not_exist
+    pattern: "console\\.log"
+    files: "src/**/*.ts"
+    message: "No console.log in production source"
+  - type: import_boundary
+    from: "src/services/**"
+    cannot_import: ["src/ui/**"]
+    message: "Services cannot import from UI layer"
+---
+```
+
+**What you'll notice**: The Ralph Loop rejection payload now includes a `spec-compliance` gate section. Violations show specId, file, and line evidence. Fix the violation and the gate passes.
+
+---
+
+#### Upgrade 4: Knowledge Notes
+
+**Before**: Non-obvious implementation facts discovered during a session were lost when the session ended. The next session had to rediscover the same gotchas.
+
+**After**: Agents call `knowledge_note({category, scope, summary, evidence, critical})` inline during implementation (intercepted by `pre-tool-use.js`). Notes are scoped by file glob (`src/hooks/**`) and persist in `.threadwork/state/knowledge-notes.json`. Notes that survive 2 sessions are automatically promoted to the spec library.
+
+**What you'll notice**: Session-start now shows a `Knowledge Notes` block with notes relevant to the current working files. Critical notes appear at the top of every agent prompt. Over time, the spec library grows organically from discovered implementation facts.
+
+---
+
+#### Upgrade 6: Runtime Verification
+
+**Before**: "Done" meant quality gates passed. There was no check that the actual running output (built artifact, extension manifest, CLI entrypoint) was correct.
+
+**After**: A `verification` object in `project.json` defines automated checks (`file_exists`, `json_schema`, `no_forbidden_patterns`) and manual steps with expected outcomes. The `smoke-test` gate runs automated checks in the Ralph Loop. `/tw:verify-manual` generates a printable manual test checklist.
+
+**What you'll notice**: If you define a `browser-extension` profile, the `smoke-test` gate checks that `dist/manifest.json` exists and has the required keys before marking a task complete.
+
+---
+
+#### Upgrade 8: Autonomous Operation Mode
+
+**Before**: Every plan required manual approval. Every session required a manual resume command.
+
+**After**: Three autonomy levels control how much manual confirmation Threadwork requires:
+- `supervised` (default) — no change; all approvals required
+- `guided` — shows plans and waits 10 seconds (auto-approves if no input)
+- `autonomous` — auto-approves plans with no blocking issues; auto-resumes sessions; auto-generates handoffs at budget thresholds
+
+Safety rails are always active regardless of level. The following always require explicit confirmation: `git push`, `rm -rf`, `DROP TABLE`, `--force`, security configuration changes, budget overruns.
+
+**What you'll notice**: In `autonomous` mode, phases execute with minimal interruption. The session-start shows `Autonomy: autonomous — auto-resume active`. Handoffs are generated automatically when the token budget hits 80%.
+
+---
+
 ## Upgrading from v0.2.x → v0.3.0
 
 ### Prerequisites

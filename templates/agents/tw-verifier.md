@@ -38,6 +38,20 @@ At the end: Write checkpoint with `{ "step": "verification-complete", "phase": N
 - Are error cases handled across component boundaries?
 - Are there any obvious regression risks?
 
+### Design fidelity checks (if design_refs present in injected context):
+For each design reference injected into your context:
+1. Read the design file as instructed (image → visual inspection, HTML → markup review, SVG → structure review)
+2. Compare the implemented output against the design at the specified fidelity level:
+   - `exact`: Layout, colors, spacing, and component placement must match pixel-for-pixel
+   - `structural`: Same layout hierarchy and sections must be present; colors/fonts may vary
+   - `reference`: Key concepts and interaction patterns must be reflected; visual details flexible
+3. Report each design ref in the verification table with a `DESIGN:` prefix on the REQ-ID:
+
+| REQ-ID | Description | Status | Evidence |
+|--------|-------------|--------|----------|
+| DESIGN:homepage | Homepage desktop layout (exact) | ✅ PASS | Header, hero, 3-col grid matches designs/homepage.png |
+| DESIGN:homepage-mobile | Homepage mobile (structural) | ⚠️ PARTIAL | Layout hierarchy correct but nav hamburger missing |
+
 ## VERIFICATION.md Format
 
 ```markdown

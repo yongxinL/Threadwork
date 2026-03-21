@@ -28,7 +28,7 @@ function logHook(level, message) {
 async function main() {
   let payload = {};
   try {
-    const raw = readFileSync('/dev/stdin', 'utf8').trim();
+    const raw = readFileSync(0, 'utf8').trim();
     if (raw) payload = JSON.parse(raw);
   } catch { /* malformed or empty stdin */ }
 
@@ -75,8 +75,47 @@ async function main() {
       const tokens = estimateTokens(specContent);
       try { recordSpecFetch(specId, tokens); } catch { /* never crash */ }
       logHook('INFO', `pre-tool-use: spec_fetch ${specId} | ${tokens} tokens`);
+
+      // v0.3.2: Check for design_refs in fetched spec and inject design block
+      let resultContent = specContent;
+      try {
+        const { loadDesignRefs, resolveDesignRefsForFiles, buildDesignInjectionBlock } =
+          await import('../lib/design-ref.js');
+        const specsDir = join(process.cwd(), '.threadwork', 'specs');
+        const allRefs = loadDesignRefs(specsDir, process.cwd());
+        // Filter to refs belonging to this spec
+        const specRefs = allRefs.filter(r => r.specId === specId && r.exists);
+        if (specRefs.length > 0) {
+          const designBlock = buildDesignInjectionBlock(specRefs, process.cwd());
+          if (designBlock) resultContent = specContent + '\n\n' + designBlock;
+        }
+      } catch { /* design-ref not available — continue */ }
+
       // Return spec content as the tool result (intercept the call)
-      process.stdout.write(JSON.stringify({ ...payload, intercept: true, result: specContent }));
+      process.stdout.write(JSON.stringify({ ...payload, intercept: true, result: resultContent }));
+      return;
+    }
+
+    // Intercept knowledge_note virtual tool (v0.3.2)
+    if (toolName === 'knowledge_note') {
+      try {
+        const { addNote } = await import('../lib/knowledge-notes.js');
+        const noteData = payload.tool_input ?? payload.input ?? {};
+        const noteId = addNote(noteData);
+        logHook('INFO', `pre-tool-use: knowledge_note captured | ${noteId} | critical=${noteData.critical ?? false}`);
+        process.stdout.write(JSON.stringify({
+          ...payload,
+          intercept: true,
+          result: `Knowledge note captured: ${noteId}. It will be injected in future sessions and can be promoted to a spec.`
+        }));
+      } catch (err) {
+        logHook('ERROR', `pre-tool-use: knowledge_note failed: ${err.message}`);
+        process.stdout.write(JSON.stringify({
+          ...payload,
+          intercept: true,
+          result: 'Knowledge note capture failed — note not saved.'
+        }));
+      }
       return;
     }
 
@@ -156,12 +195,13 @@ async function main() {
     // Spec fetch tool definition injected into every agent
     const specFetchToolDef = [
       '<!-- spec_fetch tool available: call spec_fetch with spec_id to get full spec content -->',
-      '<!-- store_fetch tool available: call store_fetch with entry_id to get Store entry -->'
+      '<!-- store_fetch tool available: call store_fetch with entry_id to get Store entry -->',
+      '<!-- knowledge_note tool available: call knowledge_note({category, scope, summary, evidence, critical}) to capture discoveries -->'
     ].join('\n');
 
     // Compose full injection prefix
     const injectionParts = [
-      `<!-- Threadwork Context Injection (v0.3.0) -->`,
+      `<!-- Threadwork Context Injection (v0.3.2) -->`,
       contextAdvisory ? contextAdvisory : '',
       tierInstructions,
       '',

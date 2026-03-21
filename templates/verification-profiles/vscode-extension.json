@@ -1,0 +1,34 @@
+{
+  "type": "vscode-extension",
+  "build": {
+    "command": "npm run compile",
+    "outputs": ["out/"]
+  },
+  "automated": [
+    {
+      "type": "file_exists",
+      "description": "Compiled extension output exists",
+      "files": ["out/extension.js"],
+      "blocking": true
+    },
+    {
+      "type": "json_schema",
+      "description": "package.json has VS Code extension fields",
+      "file": "package.json",
+      "required_keys": ["name", "version", "engines", "activationEvents", "contributes"],
+      "blocking": true
+    }
+  ],
+  "manual": [
+    {
+      "description": "Press F5 in VS Code to launch extension development host",
+      "expected": "Extension loads without errors in output panel",
+      "critical": true
+    },
+    {
+      "description": "Activate extension and test core commands",
+      "expected": "Commands work as specified in plan verification blocks",
+      "critical": true
+    }
+  ]
+}

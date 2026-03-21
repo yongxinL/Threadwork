@@ -1,6 +1,6 @@
 # Threadwork User Guide
 
-**Version:** 1.1 | **Package:** `threadwork-cc` | **Runtime:** Claude Code / Codex
+**Version:** 1.2 | **Package:** `threadwork-cc` | **Runtime:** Claude Code / Codex
 
 ---
 
@@ -151,7 +151,7 @@ After answering, `threadwork init` will:
 - Write `project.json`, `quality-config.json`, `token-log.json`
 - Copy 4 hooks into `.threadwork/hooks/`
 - Register hooks in `~/.claude/settings.json` (Claude Code) or inject into `AGENTS.md` (Codex)
-- Install 30 slash commands to `~/.claude/commands/tw/`
+- Install 35 slash commands to `~/.claude/commands/tw/`
 - Install 9 agent definitions to `~/.claude/agents/`
 - Copy the project-level guide as `CLAUDE.md` (or `AGENTS.md` for Codex)
 - Copy the starter spec library into `.threadwork/specs/`
@@ -354,6 +354,7 @@ All commands use the `/tw:` prefix. They are installed to `~/.claude/commands/tw
 | `/tw:recall <query>` | Search journals, specs, handoffs, and project history |
 | `/tw:specs [subcommand]` | Manage the spec library (list, show, search, add, edit, review) |
 | `/tw:journal [subcommand]` | View or search session journals (30-day rolling window) |
+| `/tw:docs-health` | Doc freshness report — stale documentation detected by file reference analysis |
 
 ### Cost & Model
 
@@ -378,6 +379,14 @@ All commands use the `/tw:` prefix. They are installed to `~/.claude/commands/tw
 |---------|-------------|
 | `/tw:tier [set <tier>]` | View current tier, or change it |
 | `/tw:status` | Full project status dashboard |
+
+### Enforcement & Verification *(New in v0.3.2)*
+
+| Command | Description |
+|---------|-------------|
+| `/tw:readiness` | 7-point harness readiness audit — spec coverage, gaps, knowledge notes, doc freshness |
+| `/tw:verify-manual` | Generate printable manual test checklist from verification profile |
+| `/tw:autonomy [set <level>]` | View or set autonomy level (supervised/guided/autonomous) |
 
 ---
 
@@ -723,18 +732,20 @@ echo '{}' | node hooks/session-start.js
 
 ## 12. Agent Roster
 
-Threadwork installs eight specialized agents into `~/.claude/agents/`. They are invoked automatically by commands — you don't call them directly in most cases.
+Threadwork installs ten specialized agents into `~/.claude/agents/`. They are invoked automatically by commands — you don't call them directly in most cases.
 
 | Agent | Model | Role |
 |-------|-------|------|
 | `tw-planner` | Opus | Generates XML execution plans with task IDs, dependencies, and per-task token estimates |
 | `tw-researcher` | Opus | Domain research — library recommendations, API docs, pattern analysis |
 | `tw-executor` | Sonnet | Implements tasks with atomic commits, spec compliance, quality gate adherence |
-| `tw-verifier` | Sonnet | Goal-backward requirements verification — maps tasks to requirements, identifies gaps |
+| `tw-verifier` | Sonnet | Goal-backward requirements verification — maps tasks to requirements, identifies gaps; checks design fidelity |
 | `tw-plan-checker` | Sonnet | Validates plans across 6 quality dimensions before execution |
 | `tw-debugger` | Opus | Hypothesis-driven debugging with systematic root cause identification |
 | `tw-dispatch` | Haiku | Parallel work coordinator — orchestrates wave execution, manages task assignment |
 | `tw-spec-writer` | Haiku | Detects patterns from completed tasks, proposes spec updates |
+| `tw-reviewer` | Sonnet | **New in v0.3.2** — Structured peer review of executor output: spec compliance, naming, import boundaries, test coverage |
+| `tw-entropy-collector` | Haiku | **Updated in v0.3.2** — Post-wave codebase integrity scan; now checks spec staleness as 7th category |
 
 All agents receive:
 - Skill tier instructions (via `pre-tool-use` hook)
@@ -767,7 +778,13 @@ threadwork-cc/
 │   ├── journal.js             Session journals (30-day rolling window)
 │   ├── handoff.js             10-section handoff generation and parsing
 │   ├── spec-engine.js         Spec parsing, relevance matching, injection building
-│   └── quality-gate.js        Lint/typecheck/test/build/security runners, SHA caching
+│   ├── quality-gate.js        Lint/typecheck/test/build/security/spec-compliance runners, SHA caching
+│   ├── rule-evaluator.js      Spec rule evaluation engine — 5 machine-checkable rule types
+│   ├── knowledge-notes.js     Knowledge note lifecycle — capture, retrieval, promotion
+│   ├── doc-freshness.js       Doc staleness detection via file reference analysis
+│   ├── design-ref.js          Design reference injection — HTML/PNG/SVG wireframes into prompts
+│   ├── verification-profile.js Runtime verification profiles — smoke tests for built artifacts
+│   └── autonomy.js            Autonomous operation mode — 3 levels, safety rails
 ├── install/
 │   ├── init.js                Interactive setup — 6 questions
 │   ├── claude-code.js         Settings.json hook merge, commands + agents install
@@ -775,8 +792,8 @@ threadwork-cc/
 │   ├── update.js              Framework file updates (preserves user specs)
 │   └── status.js              CLI status dashboard
 ├── templates/
-│   ├── commands/              23 slash command markdown files
-│   ├── agents/                8 agent definition files
+│   ├── commands/              28 slash command markdown files
+│   ├── agents/                10 agent definition files
 │   ├── specs/                 Starter spec library
 │   └── AGENTS.md              Project-level guide (installed as CLAUDE.md or AGENTS.md)
 └── tests/

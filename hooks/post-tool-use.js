@@ -77,7 +77,7 @@ async function main() {
   const start = Date.now();
   let payload = {};
   try {
-    const raw = readFileSync('/dev/stdin', 'utf8').trim();
+    const raw = readFileSync(0, 'utf8').trim();
     if (raw) payload = JSON.parse(raw);
   } catch { /* malformed or empty stdin */ }
 
@@ -185,7 +185,42 @@ async function main() {
         }
       } catch { /* entropy collector module may not exist yet */ }
 
-      // 7. Store promotion pipeline — runs at session end (Task tool final completion)
+      // 7. Spec staleness tracking (v0.3.2) — track file changes against spec references
+      if ((toolName === 'Edit' || toolName === 'Write') && toolInput?.file_path) {
+        try {
+          const { trackSpecStaleness } = await import('../lib/spec-engine.js');
+          const { relative } = await import('path');
+          const relPath = relative(process.cwd(), toolInput.file_path);
+          trackSpecStaleness(relPath);
+        } catch { /* never crash */ }
+      }
+
+      // 8. Knowledge note freshness tracking (v0.3.2) — increment sessions survived
+      // (done in session-start.js, not here)
+
+      // 9. Autonomy auto-handoff at 95% budget (v0.3.2)
+      try {
+        const { getAutonomyLevel, shouldAutoChainSessions } = await import('../lib/autonomy.js');
+        const level = getAutonomyLevel();
+        if (shouldAutoChainSessions(level)) {
+          const { checkThresholds } = await import('../lib/token-tracker.js');
+          const thresholds = checkThresholds();
+          if (thresholds.critical) {
+            logHook('INFO', `post-tool-use: autonomous mode — budget critical, triggering auto-handoff signal`);
+            // Write handoff trigger flag
+            try {
+              mkdirSync(join(process.cwd(), '.threadwork', 'state'), { recursive: true });
+              writeFileSync(
+                join(process.cwd(), '.threadwork', 'state', 'auto-handoff.flag'),
+                new Date().toISOString(),
+                'utf8'
+              );
+            } catch { /* never crash */ }
+          }
+        }
+      } catch { /* autonomy module not available */ }
+
+      // 10. Store promotion pipeline — runs at session end (Task tool final completion)
       if (toolName === 'Task' && (toolOutput?.status === 'completed' || toolOutput?.done === true)) {
         try {
           const { promoteToStore } = await import('../lib/store.js');
