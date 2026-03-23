@@ -642,7 +642,7 @@ async function runMigrateV032({ cwd, stateDir, isDryRun }) {
   const reviewerSrc = join(agentTemplatesSrc, 'tw-reviewer.md');
   if (existsSync(reviewerSrc)) {
     applied.push('  [11] Installing tw-reviewer agent template');
-    if (!isDryRun) cpSync(reviewerSrc, join(commandsDest, 'tw-reviewer.md'));
+    if (!isDryRun) cpSync(reviewerSrc, join(commandsDest, 'reviewer.md'));
   } else {
     skipped.push('  [11] tw-reviewer.md template source not found');
   }

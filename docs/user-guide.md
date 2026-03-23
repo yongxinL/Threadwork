@@ -25,6 +25,7 @@
 17. [Team Mode](#17-team-mode)
 18. [Cost & Model Tier Management](#18-cost--model-tier-management)
 19. [Blueprint Evolution](#19-blueprint-evolution)
+20. [Design Reference System](#20-design-reference-system)
 
 ---
 
@@ -744,7 +745,7 @@ Threadwork installs ten specialized agents into `~/.claude/agents/`. They are in
 | `tw-debugger` | Opus | Hypothesis-driven debugging with systematic root cause identification |
 | `tw-dispatch` | Haiku | Parallel work coordinator — orchestrates wave execution, manages task assignment |
 | `tw-spec-writer` | Haiku | Detects patterns from completed tasks, proposes spec updates |
-| `tw-reviewer` | Sonnet | **New in v0.3.2** — Structured peer review of executor output: spec compliance, naming, import boundaries, test coverage |
+| `tw-reviewer` | Sonnet | **New in v0.3.2** — Structured peer review of executor output: spec compliance, naming, import boundaries, test coverage, and design fidelity (when design refs are present) |
 | `tw-entropy-collector` | Haiku | **Updated in v0.3.2** — Post-wave codebase integrity scan; now checks spec staleness as 7th category |
 
 All agents receive:
@@ -1336,5 +1337,170 @@ A recommendation is generated at:
 Your choice is written to `.threadwork/state/blueprint-migration.json` (excluded from git). This file does not trigger any implementation — it records the decision for your next session to act on.
 
 ---
+
+---
+
+## 20. Design Reference System
+
+**New in v0.3.2.** Design references make visual design files first-class inputs to the AI coding workflow. Agents read your mockups, wireframes, and HTML prototypes before implementing UI tasks — and `tw-reviewer` checks the output against the design before quality gates run.
+
+### 20.1 The Problem It Solves
+
+Before v0.3.2, agents implemented UI components from text descriptions alone. Designs lived in Figma, mockup folders, or the designer's head — the coding agent never saw them. This caused frontend implementations to drift from the intended visual design, requiring manual review cycles to catch layout and styling gaps.
+
+Design references give the agent the same artifact the designer produced.
+
+### 20.2 Supported File Formats
+
+| Format | Extensions | How agents use it |
+|--------|-----------|-------------------|
+| **Image** | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.avif`, `.bmp` | Agent uses the Read tool to view the file visually (Claude is multimodal — it sees the image) |
+| **HTML / CSS** | `.html`, `.htm`, `.css` | First 200 lines are inlined into the prompt; the full path is provided for the remainder |
+| **SVG** | `.svg` | Full content is inlined if under 500 lines; otherwise the file path is provided |
+
+Design files can live anywhere in the project. The convention is `designs/`, `mockups/`, or co-located next to component directories. Threadwork never copies or moves them — it only stores pointers in spec frontmatter.
+
+### 20.3 Adding Design References to a Spec
+
+Design references are declared in the `design_refs` array in any spec's YAML frontmatter. Existing specs without `design_refs` continue to work unchanged.
+
+```yaml
+---
+specId: SPEC:fe-login-001
+name: Login Page Design
+domain: frontend
+tags: [ui, auth, login]
+design_refs:
+  - path: designs/login-desktop.png
+    label: Login page — desktop layout
+    scope: src/app/login/**
+    fidelity: exact
+  - path: designs/login-mobile.png
+    label: Login page — mobile breakpoint
+    scope: src/app/login/**
+    fidelity: structural
+  - path: designs/login-prototype.html
+    label: Interactive HTML prototype with final CSS
+    scope: src/app/login/**
+    fidelity: exact
+---
+
+# Login Page Design Spec
+
+The login page uses a centered card layout...
+```
+
+**Field reference:**
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Path to the design file, relative to the project root |
+| `label` | Yes | Human-readable description shown in the agent's context block |
+| `scope` | Yes | Glob pattern matching the source files this design applies to (e.g. `src/app/login/**`) |
+| `fidelity` | No | Implementation expectation — see section 20.4. Default: `structural` |
+
+### 20.4 Fidelity Levels
+
+Fidelity tells the agent and reviewer how closely the implementation must match the design file.
+
+| Fidelity | Meaning | Reviewer checks |
+|----------|---------|-----------------|
+| `exact` | Pixel-perfect match — layout, spacing, colors, fonts, and all visual elements must match the design exactly | Layout, colors, fonts, all elements present, responsive behavior at breakpoints, no visual regressions |
+| `structural` | Same layout hierarchy and visual structure, but styling details may adapt to the project's design system | Overall layout structure, all required sections/components present, visual hierarchy preserved, functional flow matches prototype intent |
+| `reference` | Inspired by the design — the agent uses it as guidance, not a strict specification | Key design concepts reflected, implementation serves the same user goals, no major structural divergences |
+
+When in doubt, use `structural`. Use `exact` only for designs produced by a designer that represent the final approved look.
+
+### 20.5 Capturing Design References During Discuss Phase
+
+`/tw:discuss-phase` (question 11 and 12) is the natural place to register design files for a phase before planning begins.
+
+```
+/tw:discuss-phase 1
+```
+
+The discuss phase asks:
+
+- **Question 11** — Do you have mockups, wireframes, or design files for this phase? (provide image paths, HTML prototype paths, or Figma export paths)
+- **Question 12** — What fidelity level is required? (`exact` / `structural` / `reference`)
+
+Answers are written to `.threadwork/state/phases/phase-N/CONTEXT.md` under `## Design References`. The planner reads this context when generating task XML and adds `<design-refs>` elements to tasks that touch matching source files.
+
+You can also skip the discuss phase and add `design_refs` directly to spec frontmatter at any time.
+
+### 20.6 How Design References Flow Through the System
+
+```
+Spec frontmatter (design_refs)
+        │
+        ▼
+Routing map (pre-tool-use hook)
+  ↳ 15 tokens per ref: "Use spec_fetch SPEC:fe-login-001 to load spec + design refs"
+        │
+        ▼ (when executor fetches the spec)
+Design injection block appended to prompt
+  ↳ Images: "Read this file path with the Read tool before implementing"
+  ↳ HTML:   First 200 lines inlined + full path for remainder
+  ↳ SVG:    Full content inlined (if < 500 lines) or path
+        │
+        ▼
+tw-reviewer (after executor completes)
+  ↳ Design fidelity check added as review criterion 6
+  ↳ Fidelity-appropriate checklist generated from buildDesignReviewBlock()
+        │
+        ▼
+Doc-freshness gate
+  ↳ Dead design reference check: if a design file is deleted but still
+    referenced in a spec, the gate reports a blocking error
+```
+
+### 20.7 Starter Spec Template
+
+Threadwork installs a design reference spec template at:
+
+```
+.threadwork/specs/frontend/design-ref.md
+```
+
+Use it as a starting point when creating a spec for a new UI component:
+
+```yaml
+---
+specId: SPEC:fe-component-design
+name: Component Design Reference
+domain: frontend
+tags: [ui, design]
+design_refs:
+  - path: designs/component-name.png
+    label: Component — desktop layout
+    scope: src/components/ComponentName/**
+    fidelity: structural
+---
+
+# Component Design Reference
+
+Describe layout intent, interaction model, and any implementation notes here.
+```
+
+### 20.8 Managing Design References
+
+There is no dedicated command for design refs — they are managed as part of normal spec management:
+
+```
+/tw:specs show frontend/login-page     # view a spec including its design_refs
+/tw:specs edit frontend/login-page     # edit spec frontmatter to add/change refs
+/tw:specs add                          # create a new design ref spec interactively
+/tw:docs-health                        # check for missing or stale design files
+```
+
+`/tw:docs-health` runs the doc-freshness gate and will report any design files listed in specs that no longer exist on disk. Fix these by either restoring the file or removing the `design_refs` entry from the spec.
+
+### 20.9 Tips
+
+- **Keep design files in the repository.** Design refs use file paths — if the file is only on one machine, agents on other machines (or CI) cannot read it. Commit your `designs/` folder.
+- **Use `scope` precisely.** A ref without a scope applies to every task in the phase, which wastes tokens. Set `scope` to the directory or glob that matches the component's source files.
+- **Prefer `structural` for most UI work.** Use `exact` only when a designer has signed off on pixel-level fidelity as a requirement.
+- **HTML prototypes inject more context than images.** If you have an HTML/CSS prototype, prefer it over a screenshot — the agent can read class names, color values, and spacing directly from the markup.
+- **One spec per major UI area.** Group related components into one spec rather than creating one spec per component — it keeps the routing map compact.
 
 *Threadwork is MIT licensed. Issues and PRs welcome at [github.com/nexora/threadwork](https://github.com/nexora/threadwork).*
