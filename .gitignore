@@ -47,3 +47,7 @@ node_modules/
 
 # macOS
 .DS_Store
+
+# docs
+docs/**
+!docs/*

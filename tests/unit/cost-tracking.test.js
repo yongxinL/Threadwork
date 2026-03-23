@@ -10,10 +10,12 @@ import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-// Isolate token-log writes
+// Isolate token-log writes and pricing lookup
 const tmpDir = join(tmpdir(), `tw-cost-test-${Date.now()}`);
 mkdirSync(join(tmpDir, '.threadwork', 'state'), { recursive: true });
 Object.defineProperty(process, 'cwd', { value: () => tmpDir, configurable: true });
+// Force default pricing regardless of ~/.threadwork/pricing.json on the host machine
+process.env.THREADWORK_PRICING_PATH = join(tmpDir, 'no-pricing.json');
 
 // Use test-scoped pricing (no ~/.threadwork/pricing.json needed)
 const {
